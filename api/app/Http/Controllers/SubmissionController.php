@@ -12,34 +12,44 @@ use Symfony\Component\HttpFoundation\Response;
 class SubmissionController extends Controller
 {
     /**
-     * GET /api/assignments/{assignment}/submissions
+     * GET /api/courses/{course}/assignments/{assignment}/submissions
      * List submissions for an assignment (instructor only).
      */
-    public function index(Assignment $assignment)
+    public function index(Request $request, $course, $assignment)
     {
         /** @var  \App\Models\User  $user */
         $user = Auth::user();
+
+        $assignment = Assignment::where('id', $assignment)
+            ->where('course_id', $course)
+            ->firstOrFail();
 
         if (! $user->isInstructor() || $assignment->course->instructor_id !== $user->id) {
             abort(Response::HTTP_FORBIDDEN);
         }
 
-        $submissions = $assignment->submissions()->paginate(15);
+        $submissions = $assignment->submissions()
+            ->with('student')  // Eager load the student relationship
+            ->paginate(15);
 
         return $this->respond($submissions);
     }
 
     /**
-     * POST /api/assignments/{assignment}/submissions
+     * POST /api/courses/{course}/assignments/{assignment}/submissions
      * Student creates a submission (file, essay, or quiz). Quizzes are auto-graded.
      */
-    public function store(Request $request, Assignment $assignment)
+    public function store(Request $request, $course, $assignment)
     {
         /** @var  \App\Models\User  $user */
         $user = Auth::user();
         if (! $user->isStudent()) {
             abort(Response::HTTP_FORBIDDEN);
         }
+
+        $assignment = Assignment::where('id', $assignment)
+            ->where('course_id', $course)
+            ->firstOrFail();
 
         $enrolled = $user->enrolledCourses()
                          ->where('course_id', $assignment->course_id)
@@ -103,13 +113,21 @@ class SubmissionController extends Controller
     }
 
     /**
-     * GET /api/assignments/{assignment}/submissions/{submission}
+     * GET /api/courses/{course}/assignments/{assignment}/submissions/{submission}
      * Show a single submission (owner or instructor).
      */
-    public function show(Assignment $assignment, Submission $submission)
+    public function show($course, $assignment, $submission)
     {
         /** @var  \App\Models\User  $user */
         $user = Auth::user();
+
+        $assignment = Assignment::where('id', $assignment)
+            ->where('course_id', $course)
+            ->firstOrFail();
+
+        $submission = Submission::where('id', $submission)
+            ->where('assignment_id', $assignment->id)
+            ->firstOrFail();
 
         // students only see their own
         if ($user->isStudent() && $submission->user_id !== $user->id) {
@@ -152,7 +170,7 @@ class SubmissionController extends Controller
 
     /**
      * Helper: auto-grade a quiz submission by comparing each answer
-     * to the question’s correct option and computing a percentage.
+     * to the question's correct option and computing a percentage.
      */
     protected function autoGradeQuiz(Submission $submission)
     {

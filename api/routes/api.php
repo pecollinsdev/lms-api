@@ -11,6 +11,8 @@ use App\Http\Controllers\AnswerController;
 use App\Http\Controllers\SubmissionController;
 use App\Http\Controllers\ProgressController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\StudentController;
+use App\Http\Controllers\InstructorController;
 use Illuminate\Http\Request;
 use App\Services\JwtService;
 
@@ -72,8 +74,20 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('me', [UserController::class, 'me']);
 
+    // Student Dashboard
+    Route::get('student/dashboard', [StudentController::class, 'dashboard']);
+
+    // Instructor Dashboard
+    Route::get('instructor/dashboard', [InstructorController::class, 'dashboard']);
+
     // Courses (CRUD)
     Route::apiResource('courses', CourseController::class);
+    
+    // Course-specific endpoints
+    Route::get('courses/{course}/students', [CourseController::class, 'students']);
+    Route::get('courses/{course}/assignments', [CourseController::class, 'assignments']);
+    Route::get('courses/{course}/progress', [CourseController::class, 'progress']);
+    Route::get('courses/{course}/statistics', [CourseController::class, 'statistics']);
 
     // Enrollments
     // List my courses (student's view)
@@ -88,6 +102,7 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
 
     // Assignments
     Route::apiResource('courses.assignments', AssignmentController::class)->shallow();
+    Route::get('courses/{course}/assignments/{assignment}', [AssignmentController::class, 'show']);
 
     // Questions
     Route::apiResource('assignments.questions', QuestionController::class)->shallow();
@@ -99,9 +114,12 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
     Route::apiResource('assignments.questions.answers', AnswerController::class)->shallow();
 
     // Submissions
-    Route::apiResource('assignments.submissions', SubmissionController::class)->shallow();
+    Route::apiResource('courses.assignments.submissions', SubmissionController::class)->shallow();
     Route::get('my-submissions', [SubmissionController::class, 'mySubmissions']);
     Route::patch('submissions/{submission}', [SubmissionController::class, 'update']);
+    
+    // Instructor Assignment Submissions
+    Route::get('instructor/courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'index']);
 
     // Progress
     Route::get('/my-progress',               [ProgressController::class, 'myProgress']);
