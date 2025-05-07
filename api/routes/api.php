@@ -10,6 +10,7 @@ use App\Http\Controllers\OptionController;
 use App\Http\Controllers\AnswerController;
 use App\Http\Controllers\SubmissionController;
 use App\Http\Controllers\ProgressController;
+use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use App\Services\JwtService;
 
@@ -35,14 +36,25 @@ Route::post('login',    [AuthController::class, 'login']);
 
 // Test route for token verification
 Route::get('/verify-token', function (Request $request) {
-    $token = $request->bearerToken();
-    if (!$token) {
-        return response()->json(['error' => 'No token provided'], 401);
-    }
-    
     try {
+        // First try to get token from cookie
+        $token = $request->cookie('jwt_token');
+        
+        // If not in cookie, try Authorization header
+        if (!$token) {
+            $header = $request->header('Authorization', '');
+            if (preg_match('/Bearer\s(\S+)/', $header, $matches)) {
+                $token = $matches[1];
+            }
+        }
+
+        if (!$token) {
+            return response()->json(['error' => 'No token provided'], 401);
+        }
+        
         $jwt = app(JwtService::class);
         $decoded = $jwt->validateToken($token);
+        
         return response()->json([
             'valid' => true,
             'payload' => $decoded,
@@ -51,13 +63,14 @@ Route::get('/verify-token', function (Request $request) {
     } catch (\Exception $e) {
         return response()->json(['error' => 'Invalid token: ' . $e->getMessage()], 401);
     }
-})->middleware('auth.jwt');
+});
 
 // ── Protected endpoints ─────────────────────────────────────────────────────────
-// Requires a valid token via the auth.jwt middleware
-Route::middleware(['api', 'auth.jwt'])->group(function () {
+// Requires a valid token via the JWT middleware
+Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(function () {
     // Authentication
     Route::post('logout', [AuthController::class, 'logout']);
+    Route::get('me', [UserController::class, 'me']);
 
     // Courses (CRUD)
     Route::apiResource('courses', CourseController::class);

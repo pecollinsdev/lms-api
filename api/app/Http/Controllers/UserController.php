@@ -65,7 +65,7 @@ class UserController extends Controller
     }
 
     /**
-     * Update a user’s profile (or role if admin).
+     * Update a user's profile (or role if admin).
      */
     public function update(Request $request, User $user)
     {
@@ -118,5 +118,13 @@ class UserController extends Controller
         $user->delete();
 
         return $this->respond(null, 'User deleted', Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * Get the authenticated user's information.
+     */
+    public function me(Request $request)
+    {
+        return $this->respond($request->user());
     }
 }

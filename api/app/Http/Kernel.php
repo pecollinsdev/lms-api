@@ -30,6 +30,9 @@ class Kernel extends HttpKernel
 
         // Convert empty strings to null
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
+
+        // Log all API requests
+        \App\Http\Middleware\RequestLogger::class,
     ];
 
     /**
@@ -47,7 +50,7 @@ class Kernel extends HttpKernel
 
             // If you want **every** API request to run JWT validation automatically,
             // you can uncomment this line:
-            // \App\Http\Middleware\JwtMiddleware::class,
+            \App\Http\Middleware\JwtMiddleware::class,
         ],
     ];
 

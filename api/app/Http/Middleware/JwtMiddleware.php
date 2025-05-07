@@ -3,49 +3,56 @@
 namespace App\Http\Middleware;
 
 use Closure;
-use App\Services\JwtService;
-use App\Models\User;
-use Illuminate\Support\Facades\Auth;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\TokenExpiredException;
+use Tymon\JWTAuth\Exceptions\TokenInvalidException;
+use Tymon\JWTAuth\Exceptions\JWTException;
 use Symfony\Component\HttpFoundation\Response;
 
 class JwtMiddleware
 {
-    protected JwtService $jwt;
-
-    public function __construct(JwtService $jwt)
-    {
-        $this->jwt = $jwt;
-    }
-
     public function handle($request, Closure $next)
     {
-        $header = $request->header('Authorization', '');
-        if (! preg_match('/Bearer\s(\S+)/', $header, $matches)) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => 'Token not provided'
-            ], Response::HTTP_UNAUTHORIZED);
-        }
-
         try {
-            // Decode and validate the token
-            $decoded = $this->jwt->validateToken($matches[1]);
+            // First try to get token from cookie
+            $token = $request->cookie('jwt_token');
+            
+            // If not in cookie, try Authorization header
+            if (!$token) {
+                $header = $request->header('Authorization', '');
+                if (preg_match('/Bearer\s(\S+)/', $header, $matches)) {
+                    $token = $matches[1];
+                }
+            }
 
-            // Find the user by the subject claim
-            $user = User::where('id', $decoded->sub)->firstOrFail();
+            if (!$token) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Token not provided'
+                ], Response::HTTP_UNAUTHORIZED);
+            }
 
-            // Log the user into Laravel's Auth system
-            Auth::login($user);
-
-            // Ensure $request->user() returns this user
-            $request->setUserResolver(fn() => $user);
-
-            // Make the raw payload available if you need it
-            $request->attributes->set('jwt_payload', $decoded);
-        } catch (\Exception $e) {
+            // Check token and authenticate user
+            if (!$user = JWTAuth::setToken($token)->authenticate()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], Response::HTTP_UNAUTHORIZED);
+            }
+        } catch (TokenExpiredException $e) {
             return response()->json([
-                'status'  => 'error',
-                'message' => 'Invalid token'
+                'status' => 'error',
+                'message' => 'Token has expired'
+            ], Response::HTTP_UNAUTHORIZED);
+        } catch (TokenInvalidException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Token is invalid'
+            ], Response::HTTP_UNAUTHORIZED);
+        } catch (JWTException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Token not provided'
             ], Response::HTTP_UNAUTHORIZED);
         }
 

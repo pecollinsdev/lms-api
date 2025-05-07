@@ -18,4 +18,15 @@ abstract class TestCase extends BaseTestCase
 
         return $app;
     }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        
+        // Set the base URL for all requests
+        $this->withServerVariables([
+            'HTTP_HOST' => 'localhost',
+            'REQUEST_URI' => '/lms-api/api'
+        ]);
+    }
 }
