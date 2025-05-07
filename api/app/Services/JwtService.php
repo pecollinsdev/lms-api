@@ -16,7 +16,7 @@ class JwtService
     {
         $this->secret = config('jwt.secret');
         $this->algo   = config('jwt.algo');
-        $this->ttl    = config('jwt.ttl');
+        $this->ttl    = (int) config('jwt.ttl');
     }
 
     /** Generate a JWT for a given payload (e.g. user) */

@@ -24,6 +24,10 @@ class User extends Authenticatable
         'role',            // e.g. 'student', 'instructor', 'admin'
         'profile_picture', // URL or storage path
         'bio',             // short user bio
+        'phone_number',    // user's phone number
+        'instructor_code', // unique code for instructor registration
+        'academic_specialty', // instructor's field of expertise
+        'qualifications',  // instructor's qualifications
     ];
 
     /**

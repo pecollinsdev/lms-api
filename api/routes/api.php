@@ -10,6 +10,8 @@ use App\Http\Controllers\OptionController;
 use App\Http\Controllers\AnswerController;
 use App\Http\Controllers\SubmissionController;
 use App\Http\Controllers\ProgressController;
+use Illuminate\Http\Request;
+use App\Services\JwtService;
 
 // Simple test route
 Route::get('/ping', function () {
@@ -30,6 +32,26 @@ Route::get('/welcome', function () {
 });
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login',    [AuthController::class, 'login']);
+
+// Test route for token verification
+Route::get('/verify-token', function (Request $request) {
+    $token = $request->bearerToken();
+    if (!$token) {
+        return response()->json(['error' => 'No token provided'], 401);
+    }
+    
+    try {
+        $jwt = app(JwtService::class);
+        $decoded = $jwt->validateToken($token);
+        return response()->json([
+            'valid' => true,
+            'payload' => $decoded,
+            'expires_in' => $decoded->exp - time() . ' seconds'
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['error' => 'Invalid token: ' . $e->getMessage()], 401);
+    }
+})->middleware('auth.jwt');
 
 // ── Protected endpoints ─────────────────────────────────────────────────────────
 // Requires a valid token via the auth.jwt middleware
