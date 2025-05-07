@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasManyThrough;
+use App\Models\Module;
 
 class Course extends Model
 {
@@ -98,5 +99,10 @@ class Course extends Model
     public function isEnrollmentOpen(): bool
     {
         return now()->lt($this->end_date);
+    }
+
+    public function modules()
+    {
+        return $this->hasMany(Module::class);
     }
 }

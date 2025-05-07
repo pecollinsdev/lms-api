@@ -13,6 +13,8 @@ use App\Http\Controllers\ProgressController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\InstructorController;
+use App\Http\Controllers\ModuleController;
+use App\Http\Controllers\ModuleItemController;
 use Illuminate\Http\Request;
 use App\Services\JwtService;
 
@@ -104,6 +106,14 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
     Route::apiResource('courses.assignments', AssignmentController::class)->shallow();
     Route::get('courses/{course}/assignments/{assignment}', [AssignmentController::class, 'show']);
 
+    // Modules
+    Route::apiResource('courses.modules', ModuleController::class)->shallow();
+    Route::get('courses/{course}/modules/{module}', [ModuleController::class, 'show']);
+
+    // Module Items
+    Route::apiResource('module-items', ModuleItemController::class);
+    Route::post('module-items/{moduleItem}/reorder', [ModuleItemController::class, 'reorder']);
+
     // Questions
     Route::apiResource('assignments.questions', QuestionController::class)->shallow();
 
@@ -114,7 +124,9 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
     Route::apiResource('assignments.questions.answers', AnswerController::class)->shallow();
 
     // Submissions
-    Route::apiResource('courses.assignments.submissions', SubmissionController::class)->shallow();
+    Route::get('courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'index']);
+    Route::post('courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'store']);
+    Route::get('courses/{course}/assignments/{assignment}/submissions/{submission}', [SubmissionController::class, 'show']);
     Route::get('my-submissions', [SubmissionController::class, 'mySubmissions']);
     Route::patch('submissions/{submission}', [SubmissionController::class, 'update']);
     

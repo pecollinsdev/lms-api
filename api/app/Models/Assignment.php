@@ -95,4 +95,9 @@ class Assignment extends Model
     {
         return $query->where('due_date', '<', now());
     }
+
+    public function moduleItem()
+    {
+        return $this->belongsTo(ModuleItem::class, 'module_item_id');
+    }
 }

@@ -24,11 +24,30 @@ class CourseController extends Controller
 
         if ($user->isInstructor()) {
             $courses = Course::where('instructor_id', $user->id)
-                             ->paginate(15);
+                            ->with(['instructor', 'students', 'assignments', 'modules.items'])
+                            ->paginate(15);
         } else {
             $courses = Course::published()
-                             ->paginate(15);
+                            ->with(['instructor', 'students', 'assignments', 'modules.items'])
+                            ->paginate(15);
         }
+
+        // Add computed fields to each course
+        $courses->getCollection()->transform(function ($course) use ($user) {
+            $course->student_count = $course->students->count();
+            $course->assignment_count = $course->assignments->count();
+            $course->module_count = $course->modules->count();
+            $course->total_items = $course->modules->sum(function ($module) {
+                return $module->items->count();
+            });
+            
+            // Add enrollment status for students
+            if ($user->isStudent()) {
+                $course->is_enrolled = $course->students()->where('user_id', $user->id)->exists();
+            }
+
+            return $course;
+        });
 
         return $this->respond($courses);
     }
@@ -67,12 +86,15 @@ class CourseController extends Controller
     {
         $this->authorize('view', $course);
 
-        // Load relationships
-        $course->load(['instructor', 'students', 'assignments']);
+        // Load relationships including modules and their items
+        $course->load(['instructor', 'students', 'assignments', 'modules.items']);
 
         // Add computed fields
         $course->student_count = $course->students->count();
         $course->assignment_count = $course->assignments->count();
+
+        // Optionally, remove assignments from the response if you want to only use modules/module items
+        // unset($course->assignments);
 
         return $this->respond($course);
     }

@@ -4,6 +4,8 @@ namespace Database\Seeders;
 
 use App\Models\User;
 use App\Models\Course;
+use App\Models\Module;
+use App\Models\ModuleItem;
 use App\Models\Assignment;
 use App\Models\Enrollment;
 use App\Models\Submission;
@@ -88,6 +90,168 @@ class DatabaseSeeder extends Seeder
             'start_date' => now(),
             'end_date' => now()->addMonths(3),
             'is_published' => true,
+        ]);
+
+        // Create modules for Introduction to Programming
+        $module1 = Module::create([
+            'course_id' => $course1->id,
+            'title' => 'Getting Started with Python',
+            'description' => 'Introduction to Python programming language and basic concepts',
+            'start_date' => now(),
+            'end_date' => now()->addWeeks(2),
+        ]);
+
+        $module2 = Module::create([
+            'course_id' => $course1->id,
+            'title' => 'Control Structures and Functions',
+            'description' => 'Learn about loops, conditionals, and function definitions',
+            'start_date' => now()->addWeeks(2),
+            'end_date' => now()->addWeeks(4),
+        ]);
+
+        // Create module items for Introduction to Programming
+        ModuleItem::create([
+            'module_id' => $module1->id,
+            'type' => 'video',
+            'title' => 'Introduction to Python',
+            'description' => 'Overview of Python programming language',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module1->id,
+            'type' => 'document',
+            'title' => 'Python Installation Guide',
+            'description' => 'Step-by-step guide to install Python and set up your development environment',
+            'order' => 2,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module1->id,
+            'type' => 'quiz',
+            'title' => 'Python Basics Quiz',
+            'description' => 'Test your understanding of Python fundamentals',
+            'due_date' => now()->addWeeks(1),
+            'order' => 3,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module2->id,
+            'type' => 'video',
+            'title' => 'Control Structures in Python',
+            'description' => 'Learn about if statements, loops, and other control structures',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module2->id,
+            'type' => 'assignment',
+            'title' => 'Function Implementation Exercise',
+            'description' => 'Practice writing and using functions in Python',
+            'due_date' => now()->addWeeks(3),
+            'order' => 2,
+        ]);
+
+        // Create modules for Advanced Web Development
+        $module3 = Module::create([
+            'course_id' => $course2->id,
+            'title' => 'Modern JavaScript',
+            'description' => 'Advanced JavaScript concepts and ES6+ features',
+            'start_date' => now(),
+            'end_date' => now()->addWeeks(3),
+        ]);
+
+        $module4 = Module::create([
+            'course_id' => $course2->id,
+            'title' => 'React.js Fundamentals',
+            'description' => 'Building modern user interfaces with React',
+            'start_date' => now()->addWeeks(3),
+            'end_date' => now()->addWeeks(6),
+        ]);
+
+        // Create module items for Advanced Web Development
+        ModuleItem::create([
+            'module_id' => $module3->id,
+            'type' => 'video',
+            'title' => 'ES6+ Features',
+            'description' => 'Overview of modern JavaScript features',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module3->id,
+            'type' => 'document',
+            'title' => 'JavaScript Best Practices',
+            'description' => 'Guidelines for writing clean and maintainable JavaScript code',
+            'order' => 2,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module4->id,
+            'type' => 'video',
+            'title' => 'Introduction to React',
+            'description' => 'Getting started with React.js',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module4->id,
+            'type' => 'assignment',
+            'title' => 'React Component Development',
+            'description' => 'Build a simple React application using components',
+            'due_date' => now()->addWeeks(5),
+            'order' => 2,
+        ]);
+
+        // Create modules for Calculus I
+        $module5 = Module::create([
+            'course_id' => $course3->id,
+            'title' => 'Limits and Continuity',
+            'description' => 'Understanding limits and continuous functions',
+            'start_date' => now(),
+            'end_date' => now()->addWeeks(3),
+        ]);
+
+        $module6 = Module::create([
+            'course_id' => $course3->id,
+            'title' => 'Derivatives',
+            'description' => 'Introduction to derivatives and differentiation',
+            'start_date' => now()->addWeeks(3),
+            'end_date' => now()->addWeeks(6),
+        ]);
+
+        // Create module items for Calculus I
+        ModuleItem::create([
+            'module_id' => $module5->id,
+            'type' => 'video',
+            'title' => 'Introduction to Limits',
+            'description' => 'Understanding the concept of limits in calculus',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module5->id,
+            'type' => 'document',
+            'title' => 'Continuity in Functions',
+            'description' => 'Study of continuous functions and their properties',
+            'order' => 2,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module6->id,
+            'type' => 'video',
+            'title' => 'Derivatives Basics',
+            'description' => 'Introduction to derivatives and their applications',
+            'order' => 1,
+        ]);
+
+        ModuleItem::create([
+            'module_id' => $module6->id,
+            'type' => 'quiz',
+            'title' => 'Derivatives Quiz',
+            'description' => 'Test your understanding of derivatives',
+            'due_date' => now()->addWeeks(5),
+            'order' => 2,
         ]);
 
         // Create students
