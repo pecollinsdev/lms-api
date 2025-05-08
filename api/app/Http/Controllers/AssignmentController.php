@@ -6,6 +6,7 @@ use App\Models\Course;
 use App\Models\Assignment;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
+use App\Http\Resources\AssignmentResource;
 
 class AssignmentController extends Controller
 {
@@ -45,7 +46,8 @@ class AssignmentController extends Controller
     public function show(Course $course, Assignment $assignment)
     {
         $this->authorize('view', $assignment);
-        return $this->respond($assignment);
+        $assignment->load(['submissions.student']);
+        return new AssignmentResource($assignment);
     }
 
     /**

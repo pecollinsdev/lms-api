@@ -10,6 +10,7 @@ use App\Models\Submission;
 use App\Models\Progress;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Notifications\AssignmentDueSoon;
 
 class StudentController extends Controller
 {
@@ -20,6 +21,24 @@ class StudentController extends Controller
     {
         /** @var \App\Models\User $student */
         $student = Auth::user();
+
+        // Notify student of assignments due soon (next 24 hours)
+        $now = Carbon::now();
+        $soon = $now->copy()->addDay();
+        $enrolledCourseIds = $student->enrolledCourses()->pluck('id');
+        $dueSoonAssignments = Assignment::whereIn('course_id', $enrolledCourseIds)
+            ->where('due_date', '>=', $now)
+            ->where('due_date', '<=', $soon)
+            ->get();
+        foreach ($dueSoonAssignments as $assignment) {
+            $alreadyNotified = $student->notifications()
+                ->where('type', 'App\\Notifications\\AssignmentDueSoon')
+                ->where('data->assignment_id', $assignment->id)
+                ->exists();
+            if (!$alreadyNotified) {
+                $student->notify(new AssignmentDueSoon($assignment));
+            }
+        }
 
         // Profile
         $profile = [

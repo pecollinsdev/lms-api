@@ -25,6 +25,7 @@ class Submission extends Model
         'answers',           // JSON column for quiz responses
         'submitted_at',
         'grade',
+        'score',
         'feedback',
         'status',            // 'pending', 'graded', 'late', etc.
         'graded_at',
@@ -39,6 +40,7 @@ class Submission extends Model
         'submitted_at' => 'datetime',
         'graded_at'    => 'datetime',
         'grade'        => 'decimal:2',
+        'score'        => 'decimal:2',
         'answers'      => 'array',
         'content'      => 'string',
     ];

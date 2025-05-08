@@ -15,6 +15,7 @@ use App\Http\Controllers\StudentController;
 use App\Http\Controllers\InstructorController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\ModuleItemController;
+use App\Http\Controllers\NotificationController;
 use Illuminate\Http\Request;
 use App\Services\JwtService;
 
@@ -140,4 +141,11 @@ Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(fun
     Route::get('/progress/{progress}',       [ProgressController::class, 'show']);
     Route::patch('/progress/{progress}',     [ProgressController::class, 'update']);
     Route::delete('/progress/{progress}',    [ProgressController::class, 'destroy']);
+
+    // Notification routes
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread', [NotificationController::class, 'unread']);
+    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 });

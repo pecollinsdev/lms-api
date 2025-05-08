@@ -14,6 +14,9 @@ use App\Models\InstructorCode;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use App\Notifications\AssignmentSubmitted;
+use App\Notifications\AssignmentGraded;
+use App\Notifications\AssignmentDueSoon;
 
 class DatabaseSeeder extends Seeder
 {
@@ -312,55 +315,117 @@ class DatabaseSeeder extends Seeder
             ]);
         }
 
-        // Create assignments
-        $assignment1 = Assignment::create([
-            'course_id' => $course1->id,
-            'title' => 'Python Basics',
-            'description' => 'Complete basic Python programming exercises',
-            'due_date' => now()->addDays(7),
-            'max_score' => 100,
-            'submission_type' => 'file',
-        ]);
+        // Create assignments based on module items that have submissions
+        $assignments = [
+            // From Introduction to Programming course
+            [
+                'course_id' => $course1->id,
+                'title' => 'Python Basics Quiz',
+                'description' => 'Test your understanding of Python fundamentals',
+                'due_date' => now()->addWeeks(1),
+                'max_score' => 50,
+                'submission_type' => 'quiz',
+                'module_item_id' => ModuleItem::where('title', 'Python Basics Quiz')->first()->id,
+            ],
+            [
+                'course_id' => $course1->id,
+                'title' => 'Function Implementation Exercise',
+                'description' => 'Practice writing and using functions in Python',
+                'due_date' => now()->addWeeks(3),
+                'max_score' => 100,
+                'submission_type' => 'file',
+                'module_item_id' => ModuleItem::where('title', 'Function Implementation Exercise')->first()->id,
+            ],
+            // From Advanced Web Development course
+            [
+                'course_id' => $course2->id,
+                'title' => 'React Component Development',
+                'description' => 'Build a simple React application using components',
+                'due_date' => now()->addWeeks(5),
+                'max_score' => 100,
+                'submission_type' => 'file',
+                'module_item_id' => ModuleItem::where('title', 'React Component Development')->first()->id,
+            ],
+            // From Calculus I course
+            [
+                'course_id' => $course3->id,
+                'title' => 'Derivatives Quiz',
+                'description' => 'Test your understanding of derivatives',
+                'due_date' => now()->addWeeks(5),
+                'max_score' => 50,
+                'submission_type' => 'quiz',
+                'module_item_id' => ModuleItem::where('title', 'Derivatives Quiz')->first()->id,
+            ],
+        ];
 
-        $assignment2 = Assignment::create([
-            'course_id' => $course1->id,
-            'title' => 'Web Development Quiz',
-            'description' => 'Test your knowledge of HTML, CSS, and JavaScript',
-            'due_date' => now()->addDays(14),
-            'max_score' => 50,
-            'submission_type' => 'quiz',
-        ]);
-
-        $assignment3 = Assignment::create([
-            'course_id' => $course3->id,
-            'title' => 'Calculus Problem Set',
-            'description' => 'Practice problems on derivatives and integrals',
-            'due_date' => now()->addDays(10),
-            'max_score' => 100,
-            'submission_type' => 'file',
-        ]);
+        foreach ($assignments as $assignmentData) {
+            Assignment::create($assignmentData);
+        }
 
         // Create some submissions and progress records
         foreach ($students as $index => $studentData) {
             $student = User::where('email', $studentData['email'])->first();
             
-            // Create submission for first assignment
-            Submission::create([
-                'user_id' => $student->id,
-                'assignment_id' => $assignment1->id,
-                'content' => 'Completed Python exercises',
-                'grade' => rand(70, 100),
-                'feedback' => 'Good work!',
-                'status' => 'graded',
-                'submission_type' => 'file',
-            ]);
+            // Get all assignments for the student's enrolled courses
+            $studentAssignments = Assignment::whereHas('course', function($query) use ($student) {
+                $query->whereHas('enrollments', function($q) use ($student) {
+                    $q->where('user_id', $student->id);
+                });
+            })->get();
 
-            // Create progress record
-            Progress::create([
-                'user_id' => $student->id,
-                'assignment_id' => $assignment1->id,
-                'status' => 'completed',
-            ]);
+            // Create submissions for each assignment
+            foreach ($studentAssignments as $assignment) {
+                // Randomly decide if student has submitted (80% chance)
+                if (rand(1, 100) <= 80) {
+                    // Generate a random score between 60% and 100% of max_score for quizzes, 70% to 100% for assignments
+                    if ($assignment->submission_type === 'quiz') {
+                        $score = round($assignment->max_score * (rand(60, 100) / 100), 2);
+                    } else {
+                        $score = round($assignment->max_score * (rand(70, 100) / 100), 2);
+                    }
+                    $grade = $assignment->max_score > 0 ? round(($score / $assignment->max_score) * 100, 2) : 0.0;
+
+                    $submission = Submission::create([
+                        'user_id' => $student->id,
+                        'assignment_id' => $assignment->id,
+                        'content' => $assignment->submission_type === 'quiz' 
+                            ? json_encode(['answers' => [1, 2, 3]]) // Sample quiz answers
+                            : 'Completed assignment submission',
+                        'score' => $score,
+                        'grade' => $grade,
+                        'feedback' => 'Good work!',
+                        'status' => 'graded',
+                        'submission_type' => $assignment->submission_type,
+                    ]);
+
+                    // Notify instructor of submission
+                    $instructor = $assignment->course->instructor;
+                    if ($instructor) {
+                        $instructor->notify(new AssignmentSubmitted($submission));
+                    }
+
+                    // Notify student of grading
+                    $student->notify(new AssignmentGraded($submission));
+
+                    // Notify student of due soon if assignment is due within 24 hours
+                    if ($assignment->due_date && $assignment->due_date->isBetween(now(), now()->copy()->addDay())) {
+                        $alreadyNotified = $student->notifications()
+                            ->where('type', AssignmentDueSoon::class)
+                            ->where('data->assignment_id', $assignment->id)
+                            ->exists();
+                        if (!$alreadyNotified) {
+                            $student->notify(new AssignmentDueSoon($assignment));
+                        }
+                    }
+
+                    // Create progress record
+                    Progress::create([
+                        'user_id' => $student->id,
+                        'assignment_id' => $assignment->id,
+                        'status' => 'completed',
+                    ]);
+                }
+            }
         }
     }
 }

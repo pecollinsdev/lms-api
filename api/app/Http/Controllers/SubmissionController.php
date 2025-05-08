@@ -8,6 +8,9 @@ use App\Models\Question;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
+use App\Http\Resources\SubmissionResource;
+use App\Notifications\AssignmentSubmitted;
+use App\Notifications\AssignmentGraded;
 
 class SubmissionController extends Controller
 {
@@ -86,6 +89,12 @@ class SubmissionController extends Controller
             'status'          => 'pending',
         ]);
 
+        // Notify instructor
+        $instructor = $assignment->course->instructor;
+        if ($instructor) {
+            $instructor->notify(new AssignmentSubmitted($submission));
+        }
+
         // auto-grade quizzes immediately
         if ($submission->submission_type === 'quiz') {
             $this->autoGradeQuiz($submission);
@@ -125,7 +134,8 @@ class SubmissionController extends Controller
             ->where('course_id', $course)
             ->firstOrFail();
 
-        $submission = Submission::where('id', $submission)
+        $submission = Submission::with(['assignment', 'student'])
+            ->where('id', $submission)
             ->where('assignment_id', $assignment->id)
             ->firstOrFail();
 
@@ -139,7 +149,7 @@ class SubmissionController extends Controller
             abort(Response::HTTP_FORBIDDEN);
         }
 
-        return $this->respond($submission);
+        return new SubmissionResource($submission);
     }
 
     /**
@@ -157,13 +167,21 @@ class SubmissionController extends Controller
         }
 
         $data = $request->validate([
-            'grade' => 'required|numeric|min:0|max:100',
+            'score' => 'required|numeric|min:0|max:' . $assignment->max_score,
+            'feedback' => 'nullable|string',
         ]);
 
+        $grade = $assignment->max_score > 0 ? round(($data['score'] / $assignment->max_score) * 100, 2) : 0.0;
+
         $submission->update([
-            'grade'  => $data['grade'],
+            'score'  => $data['score'],
+            'grade'  => $grade,
+            'feedback' => $data['feedback'] ?? $submission->feedback,
             'status' => 'graded',
         ]);
+
+        // Notify student
+        $submission->student->notify(new AssignmentGraded($submission));
 
         return $this->respond($submission, 'Submission graded');
     }
@@ -192,8 +210,12 @@ class SubmissionController extends Controller
         $percent = $total
             ? round(($correct / $total) * 100, 2)
             : 0.0;
+        $score = $submission->assignment && $submission->assignment->max_score > 0
+            ? round(($percent / 100) * $submission->assignment->max_score, 2)
+            : 0.0;
 
         $submission->update([
+            'score'  => $score,
             'grade'  => $percent,
             'status' => 'graded',
         ]);
