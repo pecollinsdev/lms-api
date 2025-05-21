@@ -13,14 +13,9 @@ class NotificationController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        $notifications = $user
-            ->notifications()
-            ->orderBy('created_at', 'desc')
-            ->paginate(10);
-
         return response()->json([
             'status' => 'success',
-            'data' => $notifications
+            'data' => $user->getNotifications()
         ]);
     }
 
@@ -28,14 +23,9 @@ class NotificationController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        $unreadNotifications = $user
-            ->unreadNotifications()
-            ->orderBy('created_at', 'desc')
-            ->get();
-
         return response()->json([
             'status' => 'success',
-            'data' => $unreadNotifications
+            'data' => $user->getUnreadNotifications()
         ]);
     }
 
@@ -43,11 +33,14 @@ class NotificationController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        $notification = $user
-            ->notifications()
-            ->findOrFail($id);
-            
-        $notification->markAsRead();
+        $success = $user->markNotificationAsRead($id);
+        
+        if (!$success) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Notification not found'
+            ], 404);
+        }
 
         return response()->json([
             'status' => 'success',
@@ -59,13 +52,11 @@ class NotificationController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        $user
-            ->unreadNotifications()
-            ->update(['read_at' => now()]);
+        $count = $user->markAllNotificationsAsRead();
 
         return response()->json([
             'status' => 'success',
-            'message' => 'All notifications marked as read'
+            'message' => "{$count} notifications marked as read"
         ]);
     }
 

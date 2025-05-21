@@ -3,119 +3,274 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\Course;
-use App\Models\Assignment;
+use App\Models\ModuleItem;
 use App\Models\Submission;
 use App\Models\Progress;
 use App\Models\User;
 use Carbon\Carbon;
-use App\Notifications\AssignmentDueSoon;
+use App\Notifications\ModuleItemDueSoon;
+use App\Models\Announcement;
+use App\Models\Grade;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Auth;
+use App\Models\Module;
+use App\Services\ActivityService;
 
 class StudentController extends Controller
 {
-    /**
-     * Return all dashboard data for the authenticated student.
-     */
-    public function dashboard(Request $request)
-    {
-        /** @var \App\Models\User $student */
-        $student = Auth::user();
+    protected $activityService;
 
-        // Notify student of assignments due soon (next 24 hours)
-        $now = Carbon::now();
-        $soon = $now->copy()->addDay();
-        $enrolledCourseIds = $student->enrolledCourses()->pluck('id');
-        $dueSoonAssignments = Assignment::whereIn('course_id', $enrolledCourseIds)
-            ->where('due_date', '>=', $now)
-            ->where('due_date', '<=', $soon)
+    public function __construct(ActivityService $activityService)
+    {
+        $this->activityService = $activityService;
+    }
+
+    /**
+     * Get the student's dashboard data.
+     */
+    public function dashboard()
+    {
+        $user = Auth::user();
+        
+        // Get enrolled courses with their basic info
+        $enrollments = $user->enrolledCourses()
+            ->with(['instructor:id,name,email,profile_picture'])
             ->get();
-        foreach ($dueSoonAssignments as $assignment) {
-            $alreadyNotified = $student->notifications()
-                ->where('type', 'App\\Notifications\\AssignmentDueSoon')
-                ->where('data->assignment_id', $assignment->id)
-                ->exists();
-            if (!$alreadyNotified) {
-                $student->notify(new AssignmentDueSoon($assignment));
+        
+        // Get recent activities
+        $recentActivities = $user->recentActivities();
+        
+        // Get upcoming deadlines
+        $upcomingDeadlines = $user->upcomingDeadlines();
+        
+        return response()->json([
+            'data' => [
+                'enrollments' => $enrollments,
+                'recent_activities' => $recentActivities,
+                'upcoming_deadlines' => $upcomingDeadlines
+            ]
+        ]);
+    }
+
+    public function courses()
+    {
+        $user = Auth::user();
+        $courses = $user->enrolledCourses()
+            ->with(['modules', 'instructor:id,name,email,profile_picture'])
+            ->get();
+
+        return response()->json(['data' => $courses]);
+    }
+
+    public function courseDetails($courseId)
+    {
+        $user = Auth::user();
+        $course = Course::with(['modules', 'instructor:id,name,email,profile_picture'])
+            ->whereHas('enrollments', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })
+            ->findOrFail($courseId);
+
+        return response()->json(['data' => $course]);
+    }
+
+    public function courseModules($courseId)
+    {
+        $user = Auth::user();
+        $modules = Module::with(['moduleItems' => function ($query) {
+                $query->orderBy('order', 'asc');
+            }])
+            ->whereHas('course.enrollments', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })
+            ->where('course_id', $courseId)
+            ->orderBy('order', 'asc')
+            ->get();
+
+        return response()->json(['data' => $modules]);
+    }
+
+    public function courseProgress($courseId)
+    {
+        $user = Auth::user();
+        $progress = Progress::where('user_id', $user->id)
+            ->whereHas('moduleItem.module', function ($query) use ($courseId) {
+                $query->where('course_id', $courseId);
+            })
+            ->with(['moduleItem'])
+            ->get();
+
+        $totalItems = ModuleItem::whereHas('module', function ($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })->count();
+
+        $completedItems = $progress->where('status', 'completed')->count();
+        $progressPercentage = $totalItems > 0 ? round(($completedItems / $totalItems) * 100) : 0;
+
+        return response()->json([
+            'data' => [
+                'items' => $progress,
+                'progress_percentage' => $progressPercentage,
+                'completed_items' => $completedItems,
+                'total_items' => $totalItems
+            ]
+        ]);
+    }
+
+    public function courseStatistics($courseId)
+    {
+        $user = Auth::user();
+        $submissions = Submission::where('user_id', $user->id)
+            ->whereHas('moduleItem.module', function ($query) use ($courseId) {
+                $query->where('course_id', $courseId);
+            })
+            ->with(['moduleItem'])
+            ->get();
+
+        $totalScore = 0;
+        $maxPossibleScore = 0;
+
+        foreach ($submissions as $submission) {
+            if ($submission->status === 'graded') {
+                $maxScore = $submission->moduleItem->max_score ?? 0;
+                $maxPossibleScore += $maxScore;
+                $totalScore += $submission->score ?? 0;
             }
         }
 
-        // Profile
-        $profile = [
-            'id' => $student->id,
-            'name' => $student->name,
-            'email' => $student->email,
-            'bio' => $student->bio,
-            'phone_number' => $student->phone_number,
-            'profile_picture' => $student->profile_picture,
-            'role' => $student->role,
-        ];
-
-        // Get enrolled courses collection
-        $enrolledCourses = $student->enrolledCourses()->with(['instructor', 'assignments'])->get();
-
-        // Enrolled Courses with stats
-        $courses = $enrolledCourses->map(function ($course) use ($student) {
-            // Calculate current grade for this course
-            $submissions = Submission::where('user_id', $student->id)
-                ->whereIn('assignment_id', $course->assignments->pluck('id'))
-                ->whereNotNull('grade')
-                ->get();
-            $total = $submissions->sum('grade');
-            $count = $submissions->count();
-            $current_grade = $count > 0 ? round($total / $count, 2) : null;
-            return [
-                'id' => $course->id,
-                'title' => $course->title,
-                'slug' => $course->slug,
-                'instructor' => $course->instructor ? $course->instructor->name : null,
-                'start_date' => $course->start_date,
-                'end_date' => $course->end_date,
-                'is_published' => $course->is_published,
-                'current_grade' => $current_grade,
-            ];
-        });
-
-        // Upcoming Deadlines (next 2 weeks)
-        $enrolledCourseIds = $enrolledCourses->pluck('id');
-        $upcoming_deadlines = Assignment::whereIn('course_id', $enrolledCourseIds)
-            ->where('due_date', '>=', Carbon::now())
-            ->where('due_date', '<=', Carbon::now()->addWeeks(2))
-            ->orderBy('due_date')
-            ->get(['id', 'title', 'course_id', 'due_date']);
-
-        // Recent Announcements (stub, assuming announcements table/model exists)
-        $recent_announcements = []; // Replace with actual query if Announcement model exists
-
-        // Notifications (stub, assuming notifications table/model exists)
-        $notifications = []; // Replace with actual query if Notification model exists
-
-        // Current GPA (average of all graded submissions)
-        $all_graded = Submission::where('user_id', $student->id)->whereNotNull('grade')->get();
-        $gpa = $all_graded->count() > 0 ? round($all_graded->avg('grade'), 2) : null;
-
-        // Calendar Data (assignments and course start/end dates)
-        $calendar = [
-            'assignments' => Assignment::whereIn('course_id', $enrolledCourseIds)
-                ->get(['id', 'title', 'course_id', 'due_date']),
-            'courses' => $enrolledCourses->map(function ($course) {
-                return [
-                    'id' => $course->id,
-                    'title' => $course->title,
-                    'start_date' => $course->start_date,
-                    'end_date' => $course->end_date,
-                ];
-            }),
-        ];
+        $gradePercentage = $maxPossibleScore > 0 ? round(($totalScore / $maxPossibleScore) * 100) : 0;
+        $letterGrade = $this->calculateLetterGrade($gradePercentage);
 
         return response()->json([
-            'profile' => $profile,
-            'courses' => $courses,
-            'upcoming_deadlines' => $upcoming_deadlines,
-            'recent_announcements' => $recent_announcements,
-            'notifications' => $notifications,
-            'gpa' => $gpa,
-            'calendar' => $calendar,
+            'data' => [
+                'grade' => $letterGrade . ' (' . $gradePercentage . '%)',
+                'average_grade' => $gradePercentage,
+                'letter_grade' => $letterGrade,
+                'total_score' => $totalScore,
+                'max_possible_score' => $maxPossibleScore
+            ]
         ]);
+    }
+
+    public function courseSubmissions($courseId)
+    {
+        $user = Auth::user();
+        $submissions = Submission::where('user_id', $user->id)
+            ->whereHas('moduleItem.module', function ($query) use ($courseId) {
+                $query->where('course_id', $courseId);
+            })
+            ->with(['moduleItem'])
+            ->get();
+
+        return response()->json(['data' => $submissions]);
+    }
+
+    public function itemDetails($courseId, $itemId)
+    {
+        $user = Auth::user();
+        $item = ModuleItem::whereHas('module', function ($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })
+        ->with(['module', 'submissions' => function ($query) use ($user) {
+            $query->where('user_id', $user->id);
+        }])
+        ->findOrFail($itemId);
+
+        return response()->json(['data' => $item]);
+    }
+
+    public function submitItem(Request $request, $courseId, $itemId)
+    {
+        $user = Auth::user();
+        $item = ModuleItem::whereHas('module', function ($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })->findOrFail($itemId);
+
+        $submission = Submission::create([
+            'user_id' => $user->id,
+            'module_item_id' => $itemId,
+            'content' => $request->input('content'),
+            'status' => 'submitted',
+            'submitted_at' => now()
+        ]);
+
+        $this->activityService->logSubmission($user, $submission);
+
+        return response()->json([
+            'success' => true,
+            'data' => $submission
+        ]);
+    }
+
+    public function markItemComplete($courseId, $itemId)
+    {
+        $user = Auth::user();
+        $item = ModuleItem::whereHas('module', function ($query) use ($courseId) {
+            $query->where('course_id', $courseId);
+        })->findOrFail($itemId);
+
+        $progress = Progress::updateOrCreate(
+            [
+                'user_id' => $user->id,
+                'module_item_id' => $itemId
+            ],
+            [
+                'status' => 'completed',
+                'completed_at' => now()
+            ]
+        );
+
+        $this->activityService->logItemCompletion($user, $item);
+
+        // Calculate and log course progress
+        $course = $item->module->course;
+        $totalItems = ModuleItem::whereHas('module', function ($query) use ($course) {
+            $query->where('course_id', $course->id);
+        })->count();
+
+        $completedItems = Progress::where('user_id', $user->id)
+            ->whereHas('moduleItem.module', function ($query) use ($course) {
+                $query->where('course_id', $course->id);
+            })
+            ->where('status', 'completed')
+            ->count();
+
+        $progressPercentage = $totalItems > 0 ? round(($completedItems / $totalItems) * 100) : 0;
+        $this->activityService->logCourseProgress($user, $course, $progressPercentage);
+
+        return response()->json([
+            'success' => true,
+            'data' => $progress
+        ]);
+    }
+
+    public function progress()
+    {
+        $user = Auth::user();
+        $progress = Progress::where('user_id', $user->id)
+            ->with(['moduleItem.module.course'])
+            ->get()
+            ->groupBy('moduleItem.module.course_id')
+            ->map(function ($items) {
+                $totalItems = $items->count();
+                $completedItems = $items->where('status', 'completed')->count();
+                return [
+                    'course_id' => $items->first()->moduleItem->module->course_id,
+                    'progress_percentage' => $totalItems > 0 ? round(($completedItems / $totalItems) * 100) : 0,
+                    'items' => $items
+                ];
+            });
+
+        return response()->json(['data' => $progress->values()]);
+    }
+
+    private function calculateLetterGrade($percentage)
+    {
+        if ($percentage >= 90) return 'A';
+        if ($percentage >= 80) return 'B';
+        if ($percentage >= 70) return 'C';
+        if ($percentage >= 60) return 'D';
+        return 'F';
     }
 } 

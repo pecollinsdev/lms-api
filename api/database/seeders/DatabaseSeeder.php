@@ -6,7 +6,6 @@ use App\Models\User;
 use App\Models\Course;
 use App\Models\Module;
 use App\Models\ModuleItem;
-use App\Models\Assignment;
 use App\Models\Enrollment;
 use App\Models\Submission;
 use App\Models\Progress;
@@ -14,9 +13,13 @@ use App\Models\InstructorCode;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
-use App\Notifications\AssignmentSubmitted;
-use App\Notifications\AssignmentGraded;
-use App\Notifications\AssignmentDueSoon;
+use App\Notifications\ModuleItemSubmitted;
+use App\Notifications\ModuleItemGraded;
+use App\Notifications\ModuleItemDueSoon;
+use App\Models\Question;
+use App\Models\Option;
+use App\Models\Grade;
+use Illuminate\Database\Eloquent\Collection;
 
 class DatabaseSeeder extends Seeder
 {
@@ -25,21 +28,54 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Create instructor codes
-        InstructorCode::create(['code' => 'INST001', 'is_used' => false]);
-        InstructorCode::create(['code' => 'INST002', 'is_used' => false]);
+        $this->seedInstructorCodes();
+        $admin = $this->seedAdmin();
+        $instructors = $this->seedInstructors();
+        $courses = $this->seedCourses($instructors);
+        $this->seedModules($courses);
+        $this->seedModuleItems();
+        $this->seedQuestions();
+        $students = $this->seedStudents();
+        $this->seedEnrollments($students, $courses);
+        $this->seedSubmissionsAndProgress($students);
+        $this->seedPendingSubmissions($instructors[0], $students);
+    }
 
-        // Create admin user
-        $admin = User::create([
+    /**
+     * Seed instructor codes
+     */
+    private function seedInstructorCodes(): void
+    {
+        $codes = ['INST001', 'INST002'];
+        foreach ($codes as $code) {
+            if (!InstructorCode::where('code', $code)->exists()) {
+                InstructorCode::create(['code' => $code, 'is_used' => false]);
+            }
+        }
+    }
+
+    /**
+     * Seed admin user
+     */
+    private function seedAdmin(): User
+    {
+        return User::create([
             'name' => 'Admin User',
             'email' => 'admin@example.com',
             'password' => Hash::make('password'),
             'role' => 'admin',
             'phone_number' => '1234567890',
             'bio' => 'System administrator with full access to all features.',
+            'email_verified_at' => now(),
+            'profile_picture' => null,
         ]);
+    }
 
-        // Create instructors
+    /**
+     * Seed instructors
+     */
+    private function seedInstructors(): array
+    {
         $instructor1 = User::create([
             'name' => 'John Doe',
             'email' => 'john@example.com',
@@ -50,6 +86,8 @@ class DatabaseSeeder extends Seeder
             'instructor_code' => 'INST001',
             'qualifications' => 'Ph.D. in Computer Science',
             'academic_specialty' => 'Web Development',
+            'email_verified_at' => now(),
+            'profile_picture' => null,
         ]);
 
         $instructor2 = User::create([
@@ -62,202 +100,443 @@ class DatabaseSeeder extends Seeder
             'instructor_code' => 'INST002',
             'qualifications' => 'Ph.D. in Mathematics',
             'academic_specialty' => 'Pure Mathematics',
+            'email_verified_at' => now(),
+            'profile_picture' => null,
         ]);
 
-        // Create courses
+        return [$instructor1, $instructor2];
+    }
+
+    /**
+     * Seed courses
+     */
+    private function seedCourses(array $instructors): array
+    {
         $course1 = Course::create([
             'title' => 'Introduction to Programming',
             'slug' => 'intro-programming',
             'description' => 'Learn the basics of programming with Python',
-            'instructor_id' => $instructor1->id,
+            'instructor_id' => $instructors[0]->id,
             'start_date' => now(),
             'end_date' => now()->addMonths(3),
             'is_published' => true,
+            'cover_image' => null,
         ]);
 
         $course2 = Course::create([
             'title' => 'Advanced Web Development',
             'slug' => 'advanced-web-dev',
             'description' => 'Master modern web development techniques',
-            'instructor_id' => $instructor1->id,
+            'instructor_id' => $instructors[0]->id,
             'start_date' => now(),
             'end_date' => now()->addMonths(4),
             'is_published' => true,
+            'cover_image' => null,
         ]);
 
         $course3 = Course::create([
             'title' => 'Calculus I',
             'slug' => 'calculus-1',
             'description' => 'Introduction to differential and integral calculus',
-            'instructor_id' => $instructor2->id,
+            'instructor_id' => $instructors[1]->id,
             'start_date' => now(),
             'end_date' => now()->addMonths(3),
             'is_published' => true,
+            'cover_image' => null,
         ]);
 
-        // Create modules for Introduction to Programming
-        $module1 = Module::create([
-            'course_id' => $course1->id,
+        return [$course1, $course2, $course3];
+    }
+
+    /**
+     * Seed modules
+     */
+    private function seedModules(array $courses): void
+    {
+        // Modules for Introduction to Programming
+        Module::create([
+            'course_id' => $courses[0]->id,
             'title' => 'Getting Started with Python',
             'description' => 'Introduction to Python programming language and basic concepts',
             'start_date' => now(),
             'end_date' => now()->addWeeks(2),
         ]);
 
-        $module2 = Module::create([
-            'course_id' => $course1->id,
+        Module::create([
+            'course_id' => $courses[0]->id,
             'title' => 'Control Structures and Functions',
             'description' => 'Learn about loops, conditionals, and function definitions',
             'start_date' => now()->addWeeks(2),
             'end_date' => now()->addWeeks(4),
         ]);
 
-        // Create module items for Introduction to Programming
-        ModuleItem::create([
-            'module_id' => $module1->id,
-            'type' => 'video',
-            'title' => 'Introduction to Python',
-            'description' => 'Overview of Python programming language',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module1->id,
-            'type' => 'document',
-            'title' => 'Python Installation Guide',
-            'description' => 'Step-by-step guide to install Python and set up your development environment',
-            'order' => 2,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module1->id,
-            'type' => 'quiz',
-            'title' => 'Python Basics Quiz',
-            'description' => 'Test your understanding of Python fundamentals',
-            'due_date' => now()->addWeeks(1),
-            'order' => 3,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module2->id,
-            'type' => 'video',
-            'title' => 'Control Structures in Python',
-            'description' => 'Learn about if statements, loops, and other control structures',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module2->id,
-            'type' => 'assignment',
-            'title' => 'Function Implementation Exercise',
-            'description' => 'Practice writing and using functions in Python',
-            'due_date' => now()->addWeeks(3),
-            'order' => 2,
-        ]);
-
-        // Create modules for Advanced Web Development
-        $module3 = Module::create([
-            'course_id' => $course2->id,
+        // Modules for Advanced Web Development
+        Module::create([
+            'course_id' => $courses[1]->id,
             'title' => 'Modern JavaScript',
             'description' => 'Advanced JavaScript concepts and ES6+ features',
             'start_date' => now(),
             'end_date' => now()->addWeeks(3),
         ]);
 
-        $module4 = Module::create([
-            'course_id' => $course2->id,
+        Module::create([
+            'course_id' => $courses[1]->id,
             'title' => 'React.js Fundamentals',
             'description' => 'Building modern user interfaces with React',
             'start_date' => now()->addWeeks(3),
             'end_date' => now()->addWeeks(6),
         ]);
 
-        // Create module items for Advanced Web Development
-        ModuleItem::create([
-            'module_id' => $module3->id,
-            'type' => 'video',
-            'title' => 'ES6+ Features',
-            'description' => 'Overview of modern JavaScript features',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module3->id,
-            'type' => 'document',
-            'title' => 'JavaScript Best Practices',
-            'description' => 'Guidelines for writing clean and maintainable JavaScript code',
-            'order' => 2,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module4->id,
-            'type' => 'video',
-            'title' => 'Introduction to React',
-            'description' => 'Getting started with React.js',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module4->id,
-            'type' => 'assignment',
-            'title' => 'React Component Development',
-            'description' => 'Build a simple React application using components',
-            'due_date' => now()->addWeeks(5),
-            'order' => 2,
-        ]);
-
-        // Create modules for Calculus I
-        $module5 = Module::create([
-            'course_id' => $course3->id,
+        // Modules for Calculus I
+        Module::create([
+            'course_id' => $courses[2]->id,
             'title' => 'Limits and Continuity',
             'description' => 'Understanding limits and continuous functions',
             'start_date' => now(),
             'end_date' => now()->addWeeks(3),
         ]);
 
-        $module6 = Module::create([
-            'course_id' => $course3->id,
+        Module::create([
+            'course_id' => $courses[2]->id,
             'title' => 'Derivatives',
             'description' => 'Introduction to derivatives and differentiation',
             'start_date' => now()->addWeeks(3),
             'end_date' => now()->addWeeks(6),
         ]);
+    }
 
-        // Create module items for Calculus I
+    /**
+     * Seed module items
+     */
+    private function seedModuleItems(): void
+    {
+        $this->seedPythonModuleItems();
+        $this->seedWebDevModuleItems();
+        $this->seedCalculusModuleItems();
+    }
+
+    /**
+     * Seed Python module items
+     */
+    private function seedPythonModuleItems(): void
+    {
+        $module = Module::where('title', 'Getting Started with Python')->first();
+        
+        // Document
         ModuleItem::create([
-            'module_id' => $module5->id,
+            'module_id' => $module->id,
+            'type' => 'document',
+            'title' => 'Python Installation Guide',
+            'description' => 'Step-by-step guide to install Python and set up your development environment',
+            'order' => 1,
+            'content_data' => json_encode([
+                'document_url' => 'https://example.com/docs/python-installation.pdf',
+                'document_type' => 'pdf',
+                'allow_download' => true
+            ]),
+            'settings' => json_encode(['level' => 'beginner'])
+        ]);
+
+        // Video lecture
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'video',
+            'title' => 'Introduction to Python',
+            'description' => 'Overview of Python programming language',
+            'order' => 2,
+            'content_data' => json_encode([
+                'video_url' => 'https://www.youtube.com/watch?v=rfscVS0vtbw',
+                'video_provider' => 'youtube',
+                'video_duration' => 600,
+                'video_allow_download' => false
+            ]),
+            'settings' => json_encode(['level' => 'beginner', 'language' => 'English'])
+        ]);
+
+        // Quiz
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'quiz',
+            'title' => 'Python Basics Quiz',
+            'description' => 'Test your understanding of Python basics',
+            'order' => 3,
+            'content_data' => json_encode([
+                'time_limit' => 30,
+                'passing_score' => 70,
+                'max_attempts' => 3
+            ]),
+            'settings' => json_encode(['level' => 'beginner'])
+        ]);
+
+        // Assignment
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'assignment',
+            'title' => 'First Python Program',
+            'description' => 'Create your first Python program',
+            'order' => 4,
+            'content_data' => json_encode([
+                'instructions' => 'Write a simple Python program that prints "Hello, World!" and performs basic arithmetic operations.',
+                'due_date' => now()->addDays(7),
+                'max_score' => 100
+            ]),
+            'settings' => json_encode(['level' => 'beginner'])
+        ]);
+    }
+
+    /**
+     * Seed Web Development module items
+     */
+    private function seedWebDevModuleItems(): void
+    {
+        $module = Module::where('title', 'Modern JavaScript')->first();
+        
+        // Document
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'document',
+            'title' => 'ES6+ Features Reference',
+            'description' => 'Comprehensive guide to ES6+ JavaScript features',
+            'order' => 1,
+            'content_data' => json_encode([
+                'document_url' => 'https://example.com/docs/es6-features.pdf',
+                'document_type' => 'pdf',
+                'allow_download' => true
+            ]),
+            'settings' => json_encode(['level' => 'intermediate'])
+        ]);
+
+        // Video lecture
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'video',
+            'title' => 'ES6+ Features',
+            'description' => 'Overview of modern JavaScript features',
+            'order' => 2,
+            'content_data' => json_encode([
+                'video_url' => 'https://www.youtube.com/watch?v=NCwa_xi0Uuc',
+                'video_provider' => 'youtube',
+                'video_duration' => 1200,
+                'video_allow_download' => false
+            ]),
+            'settings' => json_encode(['level' => 'advanced'])
+        ]);
+
+        // Quiz
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'quiz',
+            'title' => 'JavaScript ES6 Quiz',
+            'description' => 'Test your knowledge of ES6 features',
+            'order' => 3,
+            'content_data' => json_encode([
+                'time_limit' => 45,
+                'passing_score' => 75,
+                'max_attempts' => 2
+            ]),
+            'settings' => json_encode(['level' => 'intermediate'])
+        ]);
+
+        // Assignment
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'assignment',
+            'title' => 'ES6 Project',
+            'description' => 'Create a project using ES6 features',
+            'order' => 4,
+            'content_data' => json_encode([
+                'instructions' => 'Create a simple web application using ES6 features like arrow functions, destructuring, and template literals.',
+                'due_date' => now()->addDays(14),
+                'max_score' => 100
+            ]),
+            'settings' => json_encode(['level' => 'intermediate'])
+        ]);
+    }
+
+    /**
+     * Seed Calculus module items
+     */
+    private function seedCalculusModuleItems(): void
+    {
+        $module = Module::where('title', 'Limits and Continuity')->first();
+        
+        // Document
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'document',
+            'title' => 'Limits and Continuity Notes',
+            'description' => 'Comprehensive notes on limits and continuity concepts',
+            'order' => 1,
+            'content_data' => json_encode([
+                'document_url' => 'https://example.com/docs/limits-continuity.pdf',
+                'document_type' => 'pdf',
+                'allow_download' => true
+            ]),
+            'settings' => json_encode(['topic' => 'limits'])
+        ]);
+
+        // Video lecture
+        ModuleItem::create([
+            'module_id' => $module->id,
             'type' => 'video',
             'title' => 'Introduction to Limits',
             'description' => 'Understanding the concept of limits in calculus',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module5->id,
-            'type' => 'document',
-            'title' => 'Continuity in Functions',
-            'description' => 'Study of continuous functions and their properties',
             'order' => 2,
+            'content_data' => json_encode([
+                'video_url' => 'https://www.youtube.com/watch?v=HfACrKJ_Y2w',
+                'video_provider' => 'youtube',
+                'video_duration' => 800,
+                'video_allow_download' => false
+            ]),
+            'settings' => json_encode(['topic' => 'limits'])
         ]);
 
+        // Quiz
         ModuleItem::create([
-            'module_id' => $module6->id,
-            'type' => 'video',
-            'title' => 'Derivatives Basics',
-            'description' => 'Introduction to derivatives and their applications',
-            'order' => 1,
-        ]);
-
-        ModuleItem::create([
-            'module_id' => $module6->id,
+            'module_id' => $module->id,
             'type' => 'quiz',
-            'title' => 'Derivatives Quiz',
-            'description' => 'Test your understanding of derivatives',
-            'due_date' => now()->addWeeks(5),
-            'order' => 2,
+            'title' => 'Limits Quiz',
+            'description' => 'Test your understanding of limits',
+            'order' => 3,
+            'content_data' => json_encode([
+                'time_limit' => 40,
+                'passing_score' => 70,
+                'max_attempts' => 3
+            ]),
+            'settings' => json_encode(['topic' => 'limits'])
         ]);
 
-        // Create students
+        // Assignment
+        ModuleItem::create([
+            'module_id' => $module->id,
+            'type' => 'assignment',
+            'title' => 'Limits Problem Set',
+            'description' => 'Practice problems on limits',
+            'order' => 4,
+            'content_data' => json_encode([
+                'instructions' => 'Solve the following problems involving limits and continuity.',
+                'due_date' => now()->addDays(10),
+                'max_score' => 100
+            ]),
+            'settings' => json_encode(['topic' => 'limits'])
+        ]);
+    }
+
+    /**
+     * Seed questions
+     */
+    private function seedQuestions(): void
+    {
+        $this->seedPythonQuizQuestions();
+        $this->seedDerivativesQuizQuestions();
+    }
+
+    /**
+     * Seed Python quiz questions
+     */
+    private function seedPythonQuizQuestions(): void
+    {
+        $quiz = ModuleItem::where('title', 'Python Basics Quiz')->first();
+        if (!$quiz) return;
+
+        $questions = [
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the correct way to create a variable in Python?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 1,
+            ],
+            // Add more questions...
+        ];
+
+        foreach ($questions as $questionData) {
+            $question = Question::create($questionData);
+            $this->createQuestionOptions($question);
+        }
+    }
+
+    /**
+     * Seed derivatives quiz questions
+     */
+    private function seedDerivativesQuizQuestions(): void
+    {
+        $quiz = ModuleItem::where('title', 'Derivatives Quiz')->first();
+        if (!$quiz) return;
+
+        $questions = [
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the derivative of f(x) = x²?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 1,
+            ],
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the derivative of f(x) = sin(x)?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 2,
+            ],
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the derivative of f(x) = e^x?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 3,
+            ],
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the derivative of f(x) = ln(x)?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 4,
+            ],
+            [
+                'module_item_id' => $quiz->id,
+                'prompt' => 'What is the derivative of f(x) = cos(x)?',
+                'type' => 'multiple_choice',
+                'points' => 10,
+                'order' => 5,
+            ],
+        ];
+
+        foreach ($questions as $questionData) {
+            $question = Question::create($questionData);
+            $this->createQuestionOptions($question);
+        }
+    }
+
+    /**
+     * Create options for a question
+     */
+    private function createQuestionOptions(Question $question): void
+    {
+        $options = $this->getQuestionOptions($question);
+        foreach ($options as $option) {
+            Option::create([
+                'question_id' => $question->id,
+                'text' => $option['text'],
+                'is_correct' => $option['is_correct']
+            ]);
+        }
+    }
+
+    /**
+     * Get options for a question
+     */
+    private function getQuestionOptions(Question $question): array
+    {
+        // Return appropriate options based on question
+        return [];
+    }
+
+    /**
+     * Seed students
+     */
+    private function seedStudents(): array
+    {
         $students = [
             [
                 'name' => 'Alice Johnson',
@@ -265,165 +544,347 @@ class DatabaseSeeder extends Seeder
                 'phone_number' => '4567890123',
                 'bio' => 'Computer Science student interested in web development and AI.',
             ],
-            [
-                'name' => 'Bob Wilson',
-                'email' => 'bob@example.com',
-                'phone_number' => '5678901234',
-                'bio' => 'Mathematics major with a focus on statistics and data analysis.',
-            ],
-            [
-                'name' => 'Carol Martinez',
-                'email' => 'carol@example.com',
-                'phone_number' => '6789012345',
-                'bio' => 'Engineering student passionate about artificial intelligence and robotics.',
-            ],
-            [
-                'name' => 'David Brown',
-                'email' => 'david@example.com',
-                'phone_number' => '7890123456',
-                'bio' => 'Computer Science student specializing in cybersecurity and network security.',
-            ],
-            [
-                'name' => 'Eva Garcia',
-                'email' => 'eva@example.com',
-                'phone_number' => '8901234567',
-                'bio' => 'Mathematics student interested in theoretical mathematics and abstract algebra.',
-            ],
+            // Add more students...
         ];
 
+        $createdStudents = [];
         foreach ($students as $studentData) {
-            $student = User::create([
+            $createdStudents[] = User::create([
                 'name' => $studentData['name'],
                 'email' => $studentData['email'],
                 'password' => Hash::make('password'),
                 'role' => 'student',
                 'phone_number' => $studentData['phone_number'],
                 'bio' => $studentData['bio'],
-            ]);
-
-            // Enroll students in courses
-            Enrollment::create([
-                'user_id' => $student->id,
-                'course_id' => $course1->id,
-                'status' => 'active',
-            ]);
-
-            Enrollment::create([
-                'user_id' => $student->id,
-                'course_id' => $course3->id,
-                'status' => 'active',
+                'email_verified_at' => now(),
+                'profile_picture' => null,
             ]);
         }
 
-        // Create assignments based on module items that have submissions
-        $assignments = [
-            // From Introduction to Programming course
-            [
-                'course_id' => $course1->id,
-                'title' => 'Python Basics Quiz',
-                'description' => 'Test your understanding of Python fundamentals',
-                'due_date' => now()->addWeeks(1),
-                'max_score' => 50,
-                'submission_type' => 'quiz',
-                'module_item_id' => ModuleItem::where('title', 'Python Basics Quiz')->first()->id,
-            ],
-            [
-                'course_id' => $course1->id,
-                'title' => 'Function Implementation Exercise',
-                'description' => 'Practice writing and using functions in Python',
-                'due_date' => now()->addWeeks(3),
-                'max_score' => 100,
-                'submission_type' => 'file',
-                'module_item_id' => ModuleItem::where('title', 'Function Implementation Exercise')->first()->id,
-            ],
-            // From Advanced Web Development course
-            [
-                'course_id' => $course2->id,
-                'title' => 'React Component Development',
-                'description' => 'Build a simple React application using components',
-                'due_date' => now()->addWeeks(5),
-                'max_score' => 100,
-                'submission_type' => 'file',
-                'module_item_id' => ModuleItem::where('title', 'React Component Development')->first()->id,
-            ],
-            // From Calculus I course
-            [
-                'course_id' => $course3->id,
-                'title' => 'Derivatives Quiz',
-                'description' => 'Test your understanding of derivatives',
-                'due_date' => now()->addWeeks(5),
-                'max_score' => 50,
-                'submission_type' => 'quiz',
-                'module_item_id' => ModuleItem::where('title', 'Derivatives Quiz')->first()->id,
-            ],
-        ];
+        return $createdStudents;
+    }
 
-        foreach ($assignments as $assignmentData) {
-            Assignment::create($assignmentData);
+    /**
+     * Seed enrollments
+     */
+    private function seedEnrollments(array $students, array $courses): void
+    {
+        foreach ($students as $student) {
+            Enrollment::create([
+                'user_id' => $student->id,
+                'course_id' => $courses[0]->id,
+                'status' => 'active',
+                'enrolled_at' => now(),
+            ]);
+
+            Enrollment::create([
+                'user_id' => $student->id,
+                'course_id' => $courses[2]->id,
+                'status' => 'active',
+                'enrolled_at' => now(),
+            ]);
         }
+    }
 
-        // Create some submissions and progress records
-        foreach ($students as $index => $studentData) {
-            $student = User::where('email', $studentData['email'])->first();
-            
-            // Get all assignments for the student's enrolled courses
-            $studentAssignments = Assignment::whereHas('course', function($query) use ($student) {
-                $query->whereHas('enrollments', function($q) use ($student) {
-                    $q->where('user_id', $student->id);
-                });
-            })->get();
+    /**
+     * Seed submissions and progress
+     */
+    private function seedSubmissionsAndProgress(array $students): void
+    {
+        foreach ($students as $student) {
+            $this->createStudentSubmissions($student);
+        }
+    }
 
-            // Create submissions for each assignment
-            foreach ($studentAssignments as $assignment) {
-                // Randomly decide if student has submitted (80% chance)
+    /**
+     * Create submissions for a student
+     */
+    private function createStudentSubmissions(User $student): void
+    {
+        $moduleItems = $this->getStudentModuleItems($student);
+        
+        foreach ($moduleItems as $moduleItem) {
+            // Only create submissions for quizzes and assignments
+            if (in_array($moduleItem->type, ['quiz', 'assignment'])) {
                 if (rand(1, 100) <= 80) {
-                    // Generate a random score between 60% and 100% of max_score for quizzes, 70% to 100% for assignments
-                    if ($assignment->submission_type === 'quiz') {
-                        $score = round($assignment->max_score * (rand(60, 100) / 100), 2);
-                    } else {
-                        $score = round($assignment->max_score * (rand(70, 100) / 100), 2);
-                    }
-                    $grade = $assignment->max_score > 0 ? round(($score / $assignment->max_score) * 100, 2) : 0.0;
+                    $this->createSubmission($student, $moduleItem);
+                } else {
+                    $this->createPendingSubmission($student, $moduleItem);
+                }
+            }
+        }
+    }
 
-                    $submission = Submission::create([
-                        'user_id' => $student->id,
-                        'assignment_id' => $assignment->id,
-                        'content' => $assignment->submission_type === 'quiz' 
-                            ? json_encode(['answers' => [1, 2, 3]]) // Sample quiz answers
-                            : 'Completed assignment submission',
-                        'score' => $score,
-                        'grade' => $grade,
-                        'feedback' => 'Good work!',
-                        'status' => 'graded',
-                        'submission_type' => $assignment->submission_type,
-                    ]);
+    /**
+     * Get module items for a student
+     */
+    private function getStudentModuleItems(User $student): Collection
+    {
+        return ModuleItem::whereHas('module.course', function($query) use ($student) {
+            $query->whereHas('enrollments', function($q) use ($student) {
+                $q->where('user_id', $student->id);
+            });
+        })->get();
+    }
 
-                    // Notify instructor of submission
-                    $instructor = $assignment->course->instructor;
-                    if ($instructor) {
-                        $instructor->notify(new AssignmentSubmitted($submission));
-                    }
+    /**
+     * Create a submission for a module item
+     */
+    private function createSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        if ($moduleItem->type === 'quiz') {
+            $this->createQuizSubmission($student, $moduleItem);
+        } else {
+            $this->createRegularSubmission($student, $moduleItem);
+        }
+    }
 
-                    // Notify student of grading
-                    $student->notify(new AssignmentGraded($submission));
+    /**
+     * Create a quiz submission
+     */
+    private function createQuizSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        $answers = $this->generateQuizAnswers($moduleItem);
+        $score = $this->calculateQuizScore($answers, $moduleItem);
 
-                    // Notify student of due soon if assignment is due within 24 hours
-                    if ($assignment->due_date && $assignment->due_date->isBetween(now(), now()->copy()->addDay())) {
-                        $alreadyNotified = $student->notifications()
-                            ->where('type', AssignmentDueSoon::class)
-                            ->where('data->assignment_id', $assignment->id)
-                            ->exists();
-                        if (!$alreadyNotified) {
-                            $student->notify(new AssignmentDueSoon($assignment));
-                        }
-                    }
+        $submission = Submission::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'content' => json_encode(['answers' => $answers]),
+            'status' => 'graded',
+            'submission_type' => 'quiz',
+            'submitted_at' => now(),
+        ]);
 
-                    // Create progress record
-                    Progress::create([
-                        'user_id' => $student->id,
-                        'assignment_id' => $assignment->id,
-                        'status' => 'completed',
-                    ]);
+        $this->createGrade($student, $moduleItem, $submission, $score);
+        $this->createProgress($student, $moduleItem);
+        $this->sendNotifications($student, $moduleItem, $submission);
+    }
+
+    /**
+     * Create a regular submission
+     */
+    private function createRegularSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        $score = $this->calculateRegularScore($moduleItem);
+
+        $submission = Submission::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'content' => 'Completed ' . $moduleItem->type . ' submission',
+            'status' => 'graded',
+            'submission_type' => $moduleItem->submission_type ?? 'file',
+            'submitted_at' => now(),
+        ]);
+
+        $this->createGrade($student, $moduleItem, $submission, $score);
+        $this->createProgress($student, $moduleItem);
+        $this->sendNotifications($student, $moduleItem, $submission);
+    }
+
+    /**
+     * Generate quiz answers
+     */
+    private function generateQuizAnswers(ModuleItem $moduleItem): array
+    {
+        $answers = [];
+        $questions = Question::where('module_item_id', $moduleItem->id)->get();
+
+        foreach ($questions as $question) {
+            $correctOption = Option::where('question_id', $question->id)
+                ->where('is_correct', true)
+                ->first();
+            
+            if (!$correctOption) {
+                continue; // Skip this question if no correct option exists
+            }
+
+            $isCorrect = rand(1, 100) <= 70;
+            
+            if ($isCorrect) {
+                $selectedOption = $correctOption;
+            } else {
+                $incorrectOptions = Option::where('question_id', $question->id)
+                    ->where('is_correct', false)
+                    ->get();
+                
+                if ($incorrectOptions->isEmpty()) {
+                    $selectedOption = $correctOption; // Fallback to correct option if no incorrect options exist
+                } else {
+                    $selectedOption = $incorrectOptions->random();
+                }
+            }
+            
+            $answers[] = [
+                'question_id' => $question->id,
+                'selected_option_id' => $selectedOption->id,
+                'is_correct' => $isCorrect
+            ];
+        }
+
+        return $answers;
+    }
+
+    /**
+     * Calculate quiz score
+     */
+    private function calculateQuizScore(array $answers, ModuleItem $moduleItem): float
+    {
+        if (empty($answers)) {
+            return 0.0; // Return 0 if there are no answers
+        }
+        
+        $correctAnswers = count(array_filter($answers, fn($answer) => $answer['is_correct']));
+        return ($correctAnswers / count($answers)) * $moduleItem->max_score;
+    }
+
+    /**
+     * Calculate regular submission score
+     */
+    private function calculateRegularScore(ModuleItem $moduleItem): float
+    {
+        return $moduleItem->max_score > 0 ? 
+            round($moduleItem->max_score * (rand(70, 100) / 100), 2) : 0.0;
+    }
+
+    /**
+     * Create a grade record
+     */
+    private function createGrade(User $student, ModuleItem $moduleItem, Submission $submission, float $score): void
+    {
+        Grade::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'submission_id' => $submission->id,
+            'graded_by' => $moduleItem->module->course->instructor_id,
+            'score' => $score,
+            'letter_grade' => $this->calculateLetterGrade($score),
+            'feedback' => 'Good work!',
+            'graded_at' => now(),
+            'is_final' => true,
+        ]);
+    }
+
+    /**
+     * Create a progress record
+     */
+    private function createProgress(User $student, ModuleItem $moduleItem): void
+    {
+        Progress::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'status' => 'graded',
+            'completed_at' => now(),
+        ]);
+    }
+
+    /**
+     * Send notifications
+     */
+    private function sendNotifications(User $student, ModuleItem $moduleItem, Submission $submission): void
+    {
+        $instructor = $moduleItem->module->course->instructor;
+        if ($instructor) {
+            $instructor->notify(new ModuleItemSubmitted($submission));
+        }
+        $student->notify(new ModuleItemGraded($submission));
+    }
+
+    /**
+     * Calculate letter grade based on numeric grade
+     */
+    private function calculateLetterGrade(float $grade): string
+    {
+        if ($grade >= 90) return 'A';
+        if ($grade >= 80) return 'B';
+        if ($grade >= 70) return 'C';
+        if ($grade >= 60) return 'D';
+        return 'F';
+    }
+
+    /**
+     * Create a pending submission for a module item
+     */
+    private function createPendingSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        if ($moduleItem->type === 'quiz') {
+            $this->createPendingQuizSubmission($student, $moduleItem);
+        } else {
+            $this->createPendingRegularSubmission($student, $moduleItem);
+        }
+    }
+
+    /**
+     * Create a pending quiz submission
+     */
+    private function createPendingQuizSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        $answers = $this->generateQuizAnswers($moduleItem);
+
+        $submission = Submission::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'content' => json_encode(['answers' => $answers]),
+            'status' => 'pending',
+            'submission_type' => 'quiz',
+            'submitted_at' => now(),
+        ]);
+
+        $this->createProgress($student, $moduleItem);
+        $this->sendPendingNotification($student, $moduleItem, $submission);
+    }
+
+    /**
+     * Create a pending regular submission
+     */
+    private function createPendingRegularSubmission(User $student, ModuleItem $moduleItem): void
+    {
+        $submission = Submission::create([
+            'user_id' => $student->id,
+            'module_item_id' => $moduleItem->id,
+            'content' => 'Pending ' . $moduleItem->type . ' submission',
+            'status' => 'pending',
+            'submission_type' => $moduleItem->submission_type ?? 'file',
+            'submitted_at' => now(),
+        ]);
+
+        $this->createProgress($student, $moduleItem);
+        $this->sendPendingNotification($student, $moduleItem, $submission);
+    }
+
+    /**
+     * Send pending notification
+     */
+    private function sendPendingNotification(User $student, ModuleItem $moduleItem, Submission $submission): void
+    {
+        $instructor = $moduleItem->module->course->instructor;
+        if ($instructor) {
+            $instructor->notify(new ModuleItemSubmitted($submission));
+        }
+    }
+
+    /**
+     * Seed pending submissions for John's courses
+     */
+    private function seedPendingSubmissions(User $instructor, array $students): void
+    {
+        // Get all module items from John's courses that are quizzes or assignments
+        $moduleItems = ModuleItem::whereHas('module.course', function($query) use ($instructor) {
+            $query->where('instructor_id', $instructor->id);
+        })
+        ->whereIn('type', ['quiz', 'assignment'])
+        ->get();
+
+        // Create pending submissions for each student
+        foreach ($students as $student) {
+            // Select 2-3 random module items for pending submissions
+            $selectedItems = $moduleItems->random(rand(2, 3));
+            
+            foreach ($selectedItems as $moduleItem) {
+                if ($moduleItem->type === 'quiz') {
+                    $this->createPendingQuizSubmission($student, $moduleItem);
+                } else {
+                    $this->createPendingRegularSubmission($student, $moduleItem);
                 }
             }
         }

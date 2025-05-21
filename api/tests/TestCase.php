@@ -4,17 +4,17 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Contracts\Console\Kernel;
+use App\Models\User;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected User $user;
+
     public function createApplication()
     {
         $app = require __DIR__.'/../bootstrap/app.php';
 
         $app->make(Kernel::class)->bootstrap();
-
-        // Register the JWT middleware
-        $app['router']->aliasMiddleware('auth.jwt', \App\Http\Middleware\JwtMiddleware::class);
 
         return $app;
     }
@@ -23,10 +23,9 @@ abstract class TestCase extends BaseTestCase
     {
         parent::setUp();
         
-        // Set the base URL for all requests
-        $this->withServerVariables([
-            'HTTP_HOST' => 'localhost',
-            'REQUEST_URI' => '/lms-api/api'
+        // Create a test user for authentication
+        $this->user = User::factory()->create([
+            'role' => 'instructor'
         ]);
     }
 }

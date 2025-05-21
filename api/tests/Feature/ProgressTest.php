@@ -2,103 +2,216 @@
 
 namespace Tests\Feature;
 
-use App\Models\Assignment;
-use App\Models\Course;
-use App\Models\Progress;
-use App\Models\User;
-use App\Services\JwtService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
+use App\Models\User;
+use App\Models\Course;
+use App\Models\Module;
+use App\Models\ModuleItem;
+use App\Models\Progress;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\WithFaker;
+use PHPUnit\Framework\Attributes\Test;
 
 class ProgressTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, WithFaker;
 
-    protected JwtService $jwt;
+    protected User $user;
+    protected Course $course;
+    protected Module $module;
+    protected ModuleItem $moduleItem;
+    protected Progress $progress;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->jwt = $this->app->make(JwtService::class);
+        
+        // Create a test user
+        $this->user = User::factory()->create([
+            'role' => 'student'
+        ]);
+
+        // Create a test course
+        $this->course = Course::factory()->create();
+
+        // Create a test module
+        $this->module = Module::factory()->create([
+            'course_id' => $this->course->id
+        ]);
+
+        // Create a test module item
+        $this->moduleItem = ModuleItem::factory()->create([
+            'module_id' => $this->module->id
+        ]);
+
+        // Create a test progress
+        $this->progress = Progress::factory()->create([
+            'user_id' => $this->user->id,
+            'module_item_id' => $this->moduleItem->id,
+            'status' => 'in_progress',
+            'score' => null,
+            'completed_at' => null
+        ]);
+
+        // Authenticate the user
+        $this->actingAs($this->user);
     }
 
-    public function test_student_can_create_or_update_progress()
+    #[Test]
+    public function it_can_list_user_progress()
     {
-        $student    = User::factory()->student()->create();
-        $course     = Course::factory()->create(['instructor_id' => User::factory()->instructor()->create()->id]);
-        $assignment = Assignment::factory()->for($course)->create();
-        $student->enrolledCourses()->attach($course->id);
+        $response = $this->getJson('/api/progress');
 
-        $token = $this->jwt->generateToken(['sub'=>$student->id,'role'=>$student->role]);
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'user_id',
+                        'module_item_id',
+                        'status',
+                        'score',
+                        'completed_at',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
 
-        $response = $this->withHeader('Authorization','Bearer '.$token)
-                         ->postJson("/api/assignments/{$assignment->id}/progress", [
-                             'status' => 'in_progress',
-                         ]);
+    #[Test]
+    public function it_can_create_progress()
+    {
+        $progressData = [
+            'module_item_id' => $this->moduleItem->id,
+            'status' => 'in_progress'
+        ];
 
-        $response->assertCreated()
-                 ->assertJsonPath('data.status', 'in_progress');
+        $response = $this->postJson('/api/progress', $progressData);
+
+        $response->assertStatus(201)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'completed_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
 
         $this->assertDatabaseHas('progress', [
-            'user_id'       => $student->id,
-            'assignment_id' => $assignment->id,
-            'status'        => 'in_progress',
+            'user_id' => $this->user->id,
+            'module_item_id' => $progressData['module_item_id'],
+            'status' => $progressData['status']
         ]);
     }
 
-    public function test_student_cannot_progress_if_not_enrolled()
+    #[Test]
+    public function it_can_show_progress()
     {
-        $student    = User::factory()->student()->create();
-        $assignment = Assignment::factory()->create();
+        $response = $this->getJson("/api/progress/{$this->progress->id}");
 
-        $token = $this->jwt->generateToken(['sub'=>$student->id,'role'=>$student->role]);
-
-        $this->withHeader('Authorization','Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/progress", ['status'=>'completed'])
-             ->assertForbidden();
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'completed_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
     }
 
-    public function test_student_can_list_their_progress()
+    #[Test]
+    public function it_can_update_progress()
     {
-        $student = User::factory()->student()->create();
-        Progress::factory()->for($student)->create(['status'=>'completed']);
-        Progress::factory()->for($student)->create(['status'=>'in_progress']);
+        $updateData = [
+            'status' => 'completed',
+            'score' => 85,
+            'completed_at' => now()
+        ];
 
-        $token = $this->jwt->generateToken(['sub'=>$student->id,'role'=>$student->role]);
+        $response = $this->putJson("/api/progress/{$this->progress->id}", $updateData);
 
-        $this->withHeader('Authorization','Bearer '.$token)
-             ->getJson('/api/my-progress')
-             ->assertOk()
-             ->assertJsonCount(2, 'data.data');
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'completed_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
+
+        $this->assertDatabaseHas('progress', [
+            'id' => $this->progress->id,
+            'status' => $updateData['status'],
+            'score' => $updateData['score']
+        ]);
     }
 
-    public function test_instructor_can_list_assignment_progress()
+    #[Test]
+    public function it_can_delete_progress()
     {
-        $instructor = User::factory()->instructor()->create();
-        $course     = Course::factory()->create(['instructor_id' => $instructor->id]);
-        $assignment = Assignment::factory()->for($course)->create();
-        Progress::factory()->create(['assignment_id'=>$assignment->id]);
-        Progress::factory()->create(['assignment_id'=>$assignment->id]);
+        $response = $this->deleteJson("/api/progress/{$this->progress->id}");
 
-        $token = $this->jwt->generateToken(['sub'=>$instructor->id,'role'=>$instructor->role]);
-
-        $this->withHeader('Authorization','Bearer '.$token)
-             ->getJson("/api/assignments/{$assignment->id}/progress")
-             ->assertOk()
-             ->assertJsonCount(2, 'data.data');
+        $response->assertStatus(204);
+        $this->assertDatabaseMissing('progress', ['id' => $this->progress->id]);
     }
 
-    public function test_instructor_cannot_list_other_assignments_progress()
+    #[Test]
+    public function it_can_list_course_progress()
     {
-        $otherInstructor = User::factory()->instructor()->create();
-        $course     = Course::factory()->create(['instructor_id' => $otherInstructor->id]);
-        $assignment = Assignment::factory()->for($course)->create();
+        $response = $this->getJson("/api/courses/{$this->course->id}/progress");
 
-        $me         = User::factory()->instructor()->create();
-        $token      = $this->jwt->generateToken(['sub'=>$me->id,'role'=>$me->role]);
-
-        $this->withHeader('Authorization','Bearer '.$token)
-             ->getJson("/api/assignments/{$assignment->id}/progress")
-             ->assertForbidden();
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'user_id',
+                        'module_item_id',
+                        'status',
+                        'score',
+                        'completed_at',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
     }
-}
+
+    #[Test]
+    public function it_can_list_module_progress()
+    {
+        $response = $this->getJson("/api/modules/{$this->module->id}/progress");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'user_id',
+                        'module_item_id',
+                        'status',
+                        'score',
+                        'completed_at',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
+} 

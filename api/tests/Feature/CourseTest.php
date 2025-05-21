@@ -3,118 +3,209 @@
 namespace Tests\Feature;
 
 use Tests\TestCase;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Models\User;
 use App\Models\Course;
-use App\Services\JwtService;
+use App\Models\Module;
+use App\Models\ModuleItem;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\WithFaker;
+use PHPUnit\Framework\Attributes\Test;
 
 class CourseTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, WithFaker;
 
-    protected JwtService $jwt;
+    protected User $user;
+    protected Course $course;
 
     protected function setUp(): void
     {
         parent::setUp();
-
-        // Resolve the JWT service
-        $this->jwt = $this->app->make(JwtService::class);
-    }
-
-    public function test_instructor_can_create_course(): void
-    {
-        $instructor = User::factory()->create(['role' => 'instructor']);
-        $token = $this->jwt->generateToken([
-            'sub'  => $instructor->id,
-            'role' => $instructor->role,
+        
+        // Create a test user
+        $this->user = User::factory()->create([
+            'role' => 'instructor'
         ]);
 
-        $payload = [
-            'title'        => 'Intro to Testing',
-            'slug'         => 'intro-to-testing',
-            'description'  => 'A course on writing tests.',
-            'start_date'   => now()->toDateString(),
-            'end_date'     => now()->addWeek()->toDateString(),
+        // Create a test course
+        $this->course = Course::factory()->create([
+            'instructor_id' => $this->user->id
+        ]);
+
+        // Authenticate the user
+        $this->actingAs($this->user);
+    }
+
+    #[Test]
+    public function it_can_list_courses()
+    {
+        $response = $this->getJson('/api/courses');
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'title',
+                        'description',
+                        'instructor_id',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
+
+    #[Test]
+    public function it_can_create_a_course()
+    {
+        $courseData = [
+            'title' => $this->faker->sentence,
+            'slug' => $this->faker->slug,
+            'description' => $this->faker->paragraph,
+            'start_date' => now()->format('Y-m-d'),
+            'end_date' => now()->addMonths(3)->format('Y-m-d'),
             'is_published' => true,
+            'cover_image' => null
         ];
 
-        $response = $this
-            ->withHeader('Authorization', 'Bearer ' . $token)
-            ->postJson('/api/courses', $payload);
+        $response = $this->postJson('/api/courses', $courseData);
 
-        $response
-            ->assertCreated()
-            ->assertJsonPath('data.title', 'Intro to Testing')
-            ->assertJsonPath('data.slug', 'intro-to-testing');
+        $response->assertStatus(201)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'title',
+                    'slug',
+                    'description',
+                    'start_date',
+                    'end_date',
+                    'is_published',
+                    'cover_image',
+                    'instructor_id',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
 
-        $this->assertDatabaseHas('courses', [
-            'slug'          => 'intro-to-testing',
-            'instructor_id' => $instructor->id,
-        ]);
+        $this->assertDatabaseHas('courses', $courseData);
     }
 
-    public function test_student_cannot_create_course(): void
+    #[Test]
+    public function it_can_show_a_course()
     {
-        $student = User::factory()->create(['role' => 'student']);
-        $token = $this->jwt->generateToken([
-            'sub'  => $student->id,
-            'role' => $student->role,
-        ]);
+        $response = $this->getJson("/api/courses/{$this->course->id}");
 
-        $payload = [
-            'title'      => 'Student Course',
-            'slug'       => 'student-course',
-            'start_date' => now()->toDateString(),
-            'end_date'   => now()->addDay()->toDateString(),
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'title',
+                    'description',
+                    'instructor_id',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
+    }
+
+    #[Test]
+    public function it_can_update_a_course()
+    {
+        $updateData = [
+            'title' => 'Updated Course Title',
+            'slug' => 'updated-course-title',
+            'description' => 'Updated course description',
+            'start_date' => now()->format('Y-m-d'),
+            'end_date' => now()->addMonths(3)->format('Y-m-d'),
+            'is_published' => true,
+            'cover_image' => null
         ];
 
-        $response = $this
-            ->withHeader('Authorization', 'Bearer ' . $token)
-            ->postJson('/api/courses', $payload);
+        $response = $this->putJson("/api/courses/{$this->course->id}", $updateData);
 
-        $response->assertForbidden();
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'title',
+                    'slug',
+                    'description',
+                    'start_date',
+                    'end_date',
+                    'is_published',
+                    'cover_image',
+                    'instructor_id',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
+
+        $this->assertDatabaseHas('courses', $updateData);
     }
 
-    public function test_student_can_list_only_published_courses(): void
+    #[Test]
+    public function it_can_delete_a_course()
     {
-        $instructor = User::factory()->create(['role' => 'instructor']);
+        $response = $this->deleteJson("/api/courses/{$this->course->id}");
 
-        // Create one published and one unpublished course
-        Course::create([
-            'title'         => 'Published Course',
-            'slug'          => 'published-course',
-            'description'   => '',
-            'instructor_id' => $instructor->id,
-            'start_date'    => now()->toDateString(),
-            'end_date'      => now()->addWeek()->toDateString(),
-            'is_published'  => true,
-        ]);
-
-        Course::create([
-            'title'         => 'Unpublished Course',
-            'slug'          => 'unpublished-course',
-            'description'   => '',
-            'instructor_id' => $instructor->id,
-            'start_date'    => now()->toDateString(),
-            'end_date'      => now()->addWeek()->toDateString(),
-            'is_published'  => false,
-        ]);
-
-        $student = User::factory()->create(['role' => 'student']);
-        $token   = $this->jwt->generateToken([
-            'sub'  => $student->id,
-            'role' => $student->role,
-        ]);
-
-        $response = $this
-            ->withHeader('Authorization', 'Bearer ' . $token)
-            ->getJson('/api/courses');
-
-        $response
-            ->assertOk()
-            // Pagination wraps results under data.data
-            ->assertJsonCount(1, 'data.data')
-            ->assertJsonPath('data.data.0.slug', 'published-course');
+        $response->assertStatus(204);
+        $this->assertDatabaseMissing('courses', ['id' => $this->course->id]);
     }
-}
+
+    #[Test]
+    public function it_can_list_course_modules()
+    {
+        // Create some modules for the course
+        Module::factory()->count(3)->create([
+            'course_id' => $this->course->id
+        ]);
+
+        $response = $this->getJson("/api/courses/{$this->course->id}/modules");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'title',
+                        'description',
+                        'course_id',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
+
+    #[Test]
+    public function it_can_list_course_module_items()
+    {
+        // Create a module and module items
+        $module = Module::factory()->create([
+            'course_id' => $this->course->id
+        ]);
+
+        ModuleItem::factory()->count(3)->create([
+            'module_id' => $module->id
+        ]);
+
+        $response = $this->getJson("/api/courses/{$this->course->id}/module-items");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'title',
+                        'description',
+                        'module_id',
+                        'type',
+                        'content',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
+} 

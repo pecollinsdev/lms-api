@@ -6,20 +6,22 @@ use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvid
 use Illuminate\Support\Facades\Gate;
 use App\Models\User;
 use App\Models\Course;
-use App\Models\Enrollment;
-use App\Models\Assignment;
+use App\Models\Module;
+use App\Models\ModuleItem;
 use App\Models\Question;
 use App\Models\Option;
-use App\Models\Submission;
 use App\Models\Answer;
+use App\Models\Submission;
+use App\Models\Progress;
 use App\Policies\UserPolicy;
 use App\Policies\CoursePolicy;
-use App\Policies\EnrollmentPolicy;
-use App\Policies\AssignmentPolicy;
+use App\Policies\ModulePolicy;
+use App\Policies\ModuleItemPolicy;
 use App\Policies\QuestionPolicy;
 use App\Policies\OptionPolicy;
-use App\Policies\SubmissionPolicy;
 use App\Policies\AnswerPolicy;
+use App\Policies\SubmissionPolicy;
+use App\Policies\ProgressPolicy;
 
 class AuthServiceProvider extends ServiceProvider
 {
@@ -31,12 +33,13 @@ class AuthServiceProvider extends ServiceProvider
     protected $policies = [
         User::class       => UserPolicy::class,
         Course::class     => CoursePolicy::class,
-        Enrollment::class => EnrollmentPolicy::class,
-        Assignment::class => AssignmentPolicy::class,
+        Module::class     => ModulePolicy::class,
+        ModuleItem::class => ModuleItemPolicy::class,
         Question::class   => QuestionPolicy::class,
         Option::class     => OptionPolicy::class,
-        Submission::class => SubmissionPolicy::class,
         Answer::class     => AnswerPolicy::class,
+        Submission::class => SubmissionPolicy::class,
+        Progress::class   => ProgressPolicy::class,
     ];
 
     /**

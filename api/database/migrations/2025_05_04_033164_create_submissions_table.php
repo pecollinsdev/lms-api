@@ -10,8 +10,8 @@ return new class extends Migration
     {
         Schema::create('submissions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('assignment_id')
-                  ->constrained('assignments')
+            $table->foreignId('module_item_id')
+                  ->constrained('module_items')
                   ->cascadeOnDelete();
             $table->foreignId('user_id')
                   ->constrained('users')
@@ -21,11 +21,8 @@ return new class extends Migration
             $table->text('content')->nullable();
             $table->json('answers')->nullable();
             $table->timestamp('submitted_at')->useCurrent();
-            $table->decimal('grade', 8, 2)->nullable();
-            $table->text('feedback')->nullable();
             $table->enum('status', ['pending','graded','late'])
                   ->default('pending');
-            $table->timestamp('graded_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });

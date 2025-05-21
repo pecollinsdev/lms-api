@@ -18,7 +18,8 @@ class Answer extends Model
      */
     protected $fillable = [
         'user_id',
-        'assignment_id',
+        'module_item_id',
+        'submission_id',
         'question_id',
         'answer_text',      // if free‐text
         'selected_option_id', // if multiple choice

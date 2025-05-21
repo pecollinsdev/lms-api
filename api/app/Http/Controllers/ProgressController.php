@@ -2,130 +2,214 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Assignment;
+use App\Models\ModuleItem;
 use App\Models\Progress;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
+use App\Http\Resources\ProgressResource;
+use App\Models\Course;
+use App\Models\Module;
 
 class ProgressController extends Controller
 {
     /** 
-     * GET /api/assignments/{assignment}/progress
-     * Instructor: list all students’ progress on this assignment 
+     * GET /api/module-items/{item}/progress
+     * List all students' progress on this module item (instructor only)
      */
-    public function index(Assignment $assignment)
+    public function index(ModuleItem $moduleItem)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        if (! $user->isInstructor() || $assignment->course->instructor_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
-
-        $all = Progress::where('assignment_id', $assignment->id)
-                       ->with('user')
-                       ->paginate(15);
-
-        return $this->respond($all);
+        $this->authorize('viewAny', Progress::class);
+        return ProgressResource::collection(Progress::getForModuleItem($moduleItem->id));
     }
 
     /**
-     * GET /api/my-progress
-     * Student: list your own progress records
+     * GET /api/progress/my-progress
+     * List your own progress records (student only)
      */
-    public function myProgress()
+    public function myProgress(Request $request)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        if (! $user->isStudent()) {
-            abort(Response::HTTP_FORBIDDEN);
+        $user = $request->user();
+        $courses = $user->enrolledCourses()->with('modules.items')->get();
+        $results = [];
+
+        foreach ($courses as $course) {
+            $moduleItems = $course->moduleItems;
+            $completedCount = 0;
+            $itemResults = [];
+            foreach ($moduleItems as $item) {
+                $status = 'not_started';
+                if (in_array($item->type, ['assignment', 'quiz'])) {
+                    if ($item->submissions()->where('user_id', $user->id)->where('status', 'graded')->exists()) {
+                        $status = 'completed';
+                        $completedCount++;
+                    }
+                } else {
+                    if ($item->progress()->where('user_id', $user->id)->where('status', 'completed')->exists()) {
+                        $status = 'completed';
+                        $completedCount++;
+                    }
+                }
+                $itemResults[] = [
+                    'module_item_id' => $item->id,
+                    'title' => $item->title,
+                    'type' => $item->type,
+                    'status' => $status,
+                ];
+            }
+            $totalItems = count($moduleItems);
+            $progressPercentage = $totalItems > 0 ? round($completedCount / $totalItems * 100) : 0;
+            $results[] = [
+                'course_id' => $course->id,
+                'course_title' => $course->title,
+                'progress_percentage' => $progressPercentage,
+                'items' => $itemResults
+            ];
         }
-
-        $mine = Progress::where('user_id', $user->id)
-                        ->with('assignment.course')
-                        ->paginate(15);
-
-        return $this->respond($mine);
+        return response()->json($results);
     }
 
     /**
-     * POST /api/assignments/{assignment}/progress
-     * Student: create or update your progress on an assignment
+     * POST /api/progress
+     * Create or update progress for a module item
      */
-    public function store(Request $request, Assignment $assignment)
+    public function store(Request $request)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        $enrolled = $user->enrolledCourses()->where('course_id', $assignment->course_id)->exists();
-        if (! $user->isStudent() || ! $enrolled) {
-            abort(Response::HTTP_FORBIDDEN);
+        $data = $this->validate($request, [
+            'module_item_id' => 'required|exists:module_items,id',
+            'status' => 'required|in:not_started,in_progress,submitted,graded,completed',
+            'progress_data' => 'nullable|array',
+        ]);
+
+        $moduleItem = ModuleItem::findOrFail($data['module_item_id']);
+        $this->authorize('create', [Progress::class, $moduleItem]);
+
+        // Validate progress data based on module item type
+        if ($moduleItem->isVideo()) {
+            $this->validate($request, [
+                'progress_data.watch_time' => 'required|integer|min:0',
+                'progress_data.total_duration' => 'required|integer|min:0',
+            ]);
+
+            if (isset($moduleItem->settings['required_watch_time'])) {
+                $watchPercentage = ($data['progress_data']['watch_time'] / $data['progress_data']['total_duration']) * 100;
+                if ($watchPercentage >= $moduleItem->settings['required_watch_time']) {
+                    $data['status'] = 'completed';
+                }
+            }
+        } elseif ($moduleItem->isDocument()) {
+            $this->validate($request, [
+                'progress_data.read_time' => 'required|integer|min:0',
+                'progress_data.total_pages' => 'required|integer|min:0',
+            ]);
+
+            if (isset($moduleItem->settings['required_read_time'])) {
+                $readPercentage = ($data['progress_data']['read_time'] / $data['progress_data']['total_pages']) * 100;
+                if ($readPercentage >= $moduleItem->settings['required_read_time']) {
+                    $data['status'] = 'completed';
+                }
+            }
         }
 
-        $data = $request->validate([
-            'status' => 'required|in:not_started,in_progress,completed',
-        ]) + [
-            'user_id'       => $user->id,
-            'assignment_id' => $assignment->id,
-        ];
-
-        // If they already have a record, update it; otherwise create
-        $prog = Progress::updateOrCreate(
-            ['user_id' => $user->id, 'assignment_id' => $assignment->id],
-            ['status'  => $data['status']]
+        $progress = $moduleItem->progress()->updateOrCreate(
+            ['user_id' => $request->user()->id],
+            array_merge($data, ['last_updated_at' => now()])
         );
 
-        return $this->respond($prog, 'Progress saved', Response::HTTP_CREATED);
+        return new ProgressResource($progress);
     }
 
     /**
      * GET /api/progress/{progress}
-     * Owner student or instructor on that assignment can view one record
+     * Show a single progress record (owner or instructor)
      */
     public function show(Progress $progress)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        $isOwner      = $user->id === $progress->user_id;
-        $isInstructor = $user->isInstructor() && $progress->assignment->course->instructor_id === $user->id;
+        $this->authorize('view', $progress);
 
-        if (! ($isOwner || $isInstructor)) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
-
-        return $this->respond($progress);
+        return new ProgressResource($progress);
     }
 
     /**
-     * PATCH /api/progress/{progress}
-     * Owner student may update their own progress
+     * PUT /api/progress/{progress}
+     * Update your own progress record (owner only)
      */
     public function update(Request $request, Progress $progress)
     {
-        $user = Auth::user();
-        if ($user->id !== $progress->user_id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
+        $this->authorize('update', $progress);
 
-        $data = $request->validate([
-            'status' => 'required|in:not_started,in_progress,completed',
+        $data = $this->validated($request, [
+            'status' => 'required|in:not_started,in_progress,submitted,graded',
         ]);
 
-        $progress->update($data);
-        return $this->respond($progress, 'Progress updated');
+        $progress->update([
+            'status' => $data['status'],
+            'completed_at' => $data['status'] === 'graded' ? now() : null,
+        ]);
+
+        return new ProgressResource($progress);
     }
 
     /**
      * DELETE /api/progress/{progress}
-     * Owner student may delete/reset their record
+     * Delete/reset your own progress record (owner only)
      */
     public function destroy(Progress $progress)
     {
-        $user = Auth::user();
-        if ($user->id !== $progress->user_id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
+        $this->authorize('delete', $progress);
 
         $progress->delete();
         return $this->respond(null, 'Progress removed', Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * GET /api/courses/{course}/progress
+     * Get progress data for all module items in a course
+     */
+    public function courseProgress(Request $request, Course $course)
+    {
+        $this->authorize('view', $course);
+
+        $progress = $course->moduleItems()
+            ->with(['progress' => function ($query) use ($request) {
+                $query->where('user_id', $request->user()->id);
+            }])
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'module_item_id' => $item->id,
+                    'title' => $item->title,
+                    'type' => $item->type,
+                    'status' => $item->progress->first()?->status ?? 'not_started',
+                    'last_updated' => $item->progress->first()?->last_updated_at,
+                ];
+            });
+
+        return response()->json($progress);
+    }
+
+    /**
+     * GET /api/modules/{module}/progress
+     * Get progress data for all items in a module
+     */
+    public function moduleProgress(Request $request, Module $module)
+    {
+        $this->authorize('view', $module);
+
+        $progress = $module->items()
+            ->with(['progress' => function ($query) use ($request) {
+                $query->where('user_id', $request->user()->id);
+            }])
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'module_item_id' => $item->id,
+                    'title' => $item->title,
+                    'type' => $item->type,
+                    'status' => $item->progress->first()?->status ?? 'not_started',
+                    'last_updated' => $item->progress->first()?->last_updated_at,
+                ];
+            });
+
+        return response()->json($progress);
     }
 }

@@ -18,10 +18,10 @@ class Question extends Model
      * @var array<int,string>
      */
     protected $fillable = [
-        'assignment_id',
+        'module_item_id',
         'type',        // 'multiple_choice' or 'text'
         'prompt',      // the question text
-        'order',       // display order within the assignment
+        'order',       // display order within the module item
         'points',      // maximum score for this question
         'settings',    // JSON for MC settings (e.g. allow_multiple)
     ];
@@ -38,11 +38,30 @@ class Question extends Model
     ];
 
     /**
-     * The assignment this question belongs to.
+     * Boot the model.
      */
-    public function assignment(): BelongsTo
+    protected static function boot()
     {
-        return $this->belongsTo(Assignment::class);
+        parent::boot();
+
+        // When a question is deleted, also delete its options
+        static::deleting(function ($question) {
+            if ($question->isForceDeleting()) {
+                // If force deleting, delete options permanently
+                $question->options()->forceDelete();
+            } else {
+                // If soft deleting, soft delete options
+                $question->options()->delete();
+            }
+        });
+    }
+
+    /**
+     * The module item this question belongs to.
+     */
+    public function moduleItem(): BelongsTo
+    {
+        return $this->belongsTo(ModuleItem::class);
     }
 
     /**

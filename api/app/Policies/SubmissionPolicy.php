@@ -17,28 +17,25 @@ class SubmissionPolicy
         }
     }
 
-    public function viewAny(User $user)
+    public function viewAny(User $user): bool
     {
-        return $user->isInstructor() || $user->isAdmin();
+        return true;
     }
 
-    public function view(User $user, Submission $submission)
+    public function view(User $user, Submission $submission): bool
     {
-        if ($submission->user_id === $user->id) {
-            return true;
-        }
-        return $user->isInstructor() && $user->id === $submission->assignment->course->instructor_id;
+        return $user->id === $submission->user_id
+            || ($user->isInstructor() && $user->id === $submission->moduleItem->module->course->instructor_id);
     }
 
-    public function create(User $user)
+    public function create(User $user): bool
     {
         return $user->isStudent();
     }
 
-    public function update(User $user, Submission $submission)
+    public function update(User $user, Submission $submission): bool
     {
-        // Only instructor can update (e.g., grade)
-        return $user->isInstructor() && $user->id === $submission->assignment->course->instructor_id;
+        return $user->isInstructor() && $user->id === $submission->moduleItem->module->course->instructor_id;
     }
 
     public function grade(User $user, Submission $submission)
@@ -46,8 +43,8 @@ class SubmissionPolicy
         return $this->update($user, $submission);
     }
 
-    public function delete(User $user, Submission $submission)
+    public function delete(User $user, Submission $submission): bool
     {
-        return $submission->user_id === $user->id; // allow resubmission
+        return $user->isInstructor() && $user->id === $submission->moduleItem->module->course->instructor_id;
     }
 }

@@ -48,7 +48,8 @@ class CoursePolicy
 
     public function enroll(User $user, Course $course)
     {
-        return $user->isStudent();
+        // Allow students to self-enroll or instructors to enroll students in their courses
+        return $user->isStudent() || ($user->isInstructor() && $user->id === $course->instructor_id);
     }
 
     public function unenroll(User $user, Course $course)

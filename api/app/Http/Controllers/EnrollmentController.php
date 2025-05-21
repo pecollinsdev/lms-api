@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Course;
 use App\Models\Enrollment;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -16,29 +17,75 @@ class EnrollmentController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-
-        // Only students or admins really need to list their enrollments
         $this->authorize('viewAny', Enrollment::class);
-
-        $courses = $user->enrolledCourses()
-                        ->paginate(15);
-
-        return $this->respond($courses);
+        return $this->respond($user->getEnrolledCourses(true, true));
     }
 
     /**
      * GET /api/courses/{course}/enrollments
-     * List all students enrolled in a course.
+     * List all students enrolled in a course with statistics.
      * Instructor or admin only.
      */
     public function courseStudents(Course $course)
     {
         $this->authorize('viewAny', Enrollment::class);
 
-        $students = $course->students()
-                           ->paginate(15);
+        // Get enrollments with student relation
+        $enrollments = Enrollment::with('student')
+            ->where('course_id', $course->id)
+            ->paginate(15);
 
-        return $this->respond($students);
+        // Get total items for progress calculation
+        $totalItems = $course->moduleItems()->count();
+
+        // Map enrollments to include statistics
+        $data = $enrollments->getCollection()->map(function($enrollment) use ($course, $totalItems) {
+            $student = $enrollment->student;
+            $completedCount = 0;
+            foreach ($course->moduleItems as $item) {
+                if (in_array($item->type, ['assignment', 'quiz'])) {
+                    if ($item->submissions()->where('user_id', $student->id)->where('status', 'graded')->exists()) {
+                        $completedCount++;
+                    }
+                } else {
+                    if ($item->progress()->where('user_id', $student->id)->where('status', 'completed')->exists()) {
+                        $completedCount++;
+                    }
+                }
+            }
+            $progress = $totalItems > 0 ? round($completedCount / $totalItems * 100) : 0;
+
+            // Calculate average grade for the course
+            $averageGrade = \App\Models\Grade::where('user_id', $student->id)
+                ->whereIn('module_item_id', $course->moduleItems()->pluck('module_items.id'))
+                ->where('is_final', true)
+                ->avg('score');
+            $averageGrade = $averageGrade ? round($averageGrade, 2) : null;
+
+            return [
+                'student' => [
+                    'id' => $student->id,
+                    'name' => $student->name,
+                    'email' => $student->email,
+                ],
+                'enrolled_at' => $enrollment->enrolled_at,
+                'progress' => $progress,
+                'average_grade' => $averageGrade,
+            ];
+        });
+
+        // Return paginated response with mapped data
+        $result = [
+            'data' => $data,
+            'meta' => [
+                'current_page' => $enrollments->currentPage(),
+                'last_page' => $enrollments->lastPage(),
+                'per_page' => $enrollments->perPage(),
+                'total' => $enrollments->total(),
+            ]
+        ];
+
+        return response()->json($result);
     }
 
     /**
@@ -48,28 +95,55 @@ class EnrollmentController extends Controller
     public function store(Request $request, Course $course)
     {
         $user = $request->user();
+        $this->authorize('create', Enrollment::class);
 
-        $this->authorize('enroll', $course);
+        // If instructor is enrolling a student by email
+        if ($user->isInstructor() && $request->has('email')) {
+            // Verify instructor owns the course
+            if ($user->id !== $course->instructor_id) {
+                return $this->respond(
+                    null,
+                    'You are not authorized to enroll students in this course',
+                    Response::HTTP_FORBIDDEN
+                );
+            }
 
-        // Prevent duplicate enrollment
-        if ($course->students()->where('user_id', $user->id)->exists()) {
-            return $this->respond(
-                null,
-                'Already enrolled',
-                Response::HTTP_CONFLICT
+            $enrollment = $course->enrollStudent($user, $request->email);
+            if (!$enrollment) {
+                return $this->respond(
+                    null,
+                    'Student is already enrolled',
+                    Response::HTTP_CONFLICT
+                );
+            }
+
+            return $this->respondCreated(
+                $enrollment,
+                'Student enrolled successfully'
             );
         }
 
-        $enrollment = Enrollment::create([
-            'user_id'     => $user->id,
-            'course_id'   => $course->id,
-            'enrolled_at' => now(),
-            'status'      => 'active',
-        ]);
+        // Self-enrollment for students
+        if ($user->isStudent()) {
+            $enrollment = $course->enrollStudent($user);
+            if (!$enrollment) {
+                return $this->respond(
+                    null,
+                    'This course is not available for enrollment',
+                    Response::HTTP_FORBIDDEN
+                );
+            }
 
-        return $this->respondCreated(
-            $enrollment,
-            'Enrolled successfully'
+            return $this->respondCreated(
+                $enrollment,
+                'Enrolled successfully'
+            );
+        }
+
+        return $this->respond(
+            null,
+            'Invalid enrollment request',
+            Response::HTTP_BAD_REQUEST
         );
     }
 
@@ -83,13 +157,17 @@ class EnrollmentController extends Controller
 
         $this->authorize('unenroll', $course);
 
-        $enrollment = Enrollment::where([
-            'user_id'   => $user->id,
-            'course_id' => $course->id,
-        ])->firstOrFail();
+        $enrollment = Enrollment::findByUserAndCourse($user->id, $course->id);
+        
+        if (!$enrollment) {
+            return $this->respond(
+                null,
+                'Enrollment not found',
+                Response::HTTP_NOT_FOUND
+            );
+        }
 
-
-        // Force-delete so softDeletes don’t leave a “deleted_at” trace
+        // Force-delete so softDeletes don't leave a "deleted_at" trace
         $enrollment->forceDelete();
 
         return $this->respond(

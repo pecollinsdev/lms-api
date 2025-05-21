@@ -4,7 +4,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CourseController;
 use App\Http\Controllers\EnrollmentController;
-use App\Http\Controllers\AssignmentController;
 use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\OptionController;
 use App\Http\Controllers\AnswerController;
@@ -16,36 +15,29 @@ use App\Http\Controllers\InstructorController;
 use App\Http\Controllers\ModuleController;
 use App\Http\Controllers\ModuleItemController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\GradeController;
 use Illuminate\Http\Request;
 use App\Services\JwtService;
 
-// Simple test route
+// ── Public endpoints ────────────────────────────────────────────────────────────
 Route::get('/ping', function () {
     return response()->json(['pong' => true]);
 });
 
-// Test route
-Route::get('/test-route', function () {
-    return response()->json(['message' => 'Laravel routing is working!']);
-});
-
-// ── Public endpoints ────────────────────────────────────────────────────────────
-// No JWT required
 Route::get('/welcome', function () {
-    return response()->json([
-        'message' => 'Welcome to the API'
-    ]);
+    return response()->json(['message' => 'Welcome to the API']);
 });
-Route::post('register', [AuthController::class, 'register']);
-Route::post('login',    [AuthController::class, 'login']);
 
-// Test route for token verification
+// Authentication routes
+Route::post('register', [AuthController::class, 'register']);
+Route::post('login', [AuthController::class, 'login']);
+
+// Token verification
 Route::get('/verify-token', function (Request $request) {
     try {
-        // First try to get token from cookie
         $token = $request->cookie('jwt_token');
         
-        // If not in cookie, try Authorization header
         if (!$token) {
             $header = $request->header('Authorization', '');
             if (preg_match('/Bearer\s(\S+)/', $header, $matches)) {
@@ -71,81 +63,116 @@ Route::get('/verify-token', function (Request $request) {
 });
 
 // ── Protected endpoints ─────────────────────────────────────────────────────────
-// Requires a valid token via the JWT middleware
 Route::middleware(['api', \App\Http\Middleware\JwtMiddleware::class])->group(function () {
     // Authentication
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('me', [UserController::class, 'me']);
 
-    // Student Dashboard
-    Route::get('student/dashboard', [StudentController::class, 'dashboard']);
+    // Student routes
+    Route::prefix('student')->group(function () {
+        // Dashboard
+        Route::get('dashboard', [StudentController::class, 'dashboard']);
+        
+        // Courses
+        Route::get('courses', [StudentController::class, 'courses']);
+        Route::get('courses/{course}', [StudentController::class, 'courseDetails']);
+        Route::get('courses/{course}/modules', [StudentController::class, 'courseModules']);
+        Route::get('courses/{course}/progress', [StudentController::class, 'courseProgress']);
+        Route::get('courses/{course}/statistics', [StudentController::class, 'courseStatistics']);
+        Route::get('courses/{course}/submissions', [StudentController::class, 'courseSubmissions']);
+        
+        // Course Items
+        Route::get('courses/{course}/items/{item}', [StudentController::class, 'itemDetails']);
+        Route::post('courses/{course}/items/{item}/submit', [StudentController::class, 'submitItem']);
+        Route::post('courses/{course}/items/{item}/complete', [StudentController::class, 'markItemComplete']);
+        
+        // Progress
+        Route::get('progress', [StudentController::class, 'progress']);
+    });
 
-    // Instructor Dashboard
-    Route::get('instructor/dashboard', [InstructorController::class, 'dashboard']);
+    // Dashboard routes
+    Route::prefix('dashboard')->group(function () {
+        Route::get('student', [StudentController::class, 'dashboard']);
+        Route::get('instructor', [InstructorController::class, 'dashboard']);
+    });
 
-    // Courses (CRUD)
-    Route::apiResource('courses', CourseController::class);
-    
-    // Course-specific endpoints
-    Route::get('courses/{course}/students', [CourseController::class, 'students']);
-    Route::get('courses/{course}/assignments', [CourseController::class, 'assignments']);
-    Route::get('courses/{course}/progress', [CourseController::class, 'progress']);
-    Route::get('courses/{course}/statistics', [CourseController::class, 'statistics']);
+    // Course routes
+    Route::get('/courses', [CourseController::class, 'index']);
+    Route::post('/courses', [CourseController::class, 'store']);
+    Route::get('/courses/{course}', [CourseController::class, 'show']);
+    Route::put('/courses/{course}', [CourseController::class, 'update']);
+    Route::delete('/courses/{course}', [CourseController::class, 'destroy']);
+    Route::get('/courses/{course}/modules', [CourseController::class, 'modules']);
+    Route::post('/courses/{course}/modules', [ModuleController::class, 'store']);
+    Route::get('/courses/{course}/module-items', [CourseController::class, 'moduleItems']);
+    Route::get('/courses/{course}/submittable-items', [ModuleItemController::class, 'submittableItems']);
+    Route::post('/courses/{course}/modules/{module}/items', [ModuleItemController::class, 'store']);
+    Route::get('/courses/{course}/progress', [CourseController::class, 'progress']);
+    Route::get('/courses/{course}/statistics', [CourseController::class, 'statistics']);
 
-    // Enrollments
-    // List my courses (student's view)
+    // Enrollment routes
     Route::get('my-courses', [EnrollmentController::class, 'index']);
-
-    // List all students in a course (instructor/admin view)
     Route::get('courses/{course}/enrollments', [EnrollmentController::class, 'courseStudents']);
-
-    // Enroll and Unenroll
-    Route::post('courses/{course}/enroll',     [EnrollmentController::class, 'store']);
+    Route::post('courses/{course}/enroll', [EnrollmentController::class, 'store']);
     Route::delete('courses/{course}/unenroll', [EnrollmentController::class, 'destroy']);
 
-    // Assignments
-    Route::apiResource('courses.assignments', AssignmentController::class)->shallow();
-    Route::get('courses/{course}/assignments/{assignment}', [AssignmentController::class, 'show']);
+    // Module routes
+    Route::get('/modules', [ModuleController::class, 'index']);
+    Route::post('/modules', [ModuleController::class, 'store']);
+    Route::get('/modules/{module}', [ModuleController::class, 'show']);
+    Route::put('/modules/{module}', [ModuleController::class, 'update']);
+    Route::delete('/modules/{module}', [ModuleController::class, 'destroy']);
+    Route::get('/modules/{module}/items', [ModuleController::class, 'items']);
+    Route::get('/modules/{module}/progress', [ModuleController::class, 'progress']);
 
-    // Modules
-    Route::apiResource('courses.modules', ModuleController::class)->shallow();
-    Route::get('courses/{course}/modules/{module}', [ModuleController::class, 'show']);
+    // Module Item routes
+    Route::get('/module-items', [ModuleItemController::class, 'index']);
+    Route::post('/module-items', [ModuleItemController::class, 'store']);
+    Route::get('/module-items/{moduleItem}', [ModuleItemController::class, 'show']);
+    Route::put('/module-items/{moduleItem}', [ModuleItemController::class, 'update']);
+    Route::delete('/module-items/{moduleItem}', [ModuleItemController::class, 'destroy']);
+    Route::get('/module-items/{moduleItem}/submissions', [ModuleItemController::class, 'submissions']);
 
-    // Module Items
-    Route::apiResource('module-items', ModuleItemController::class);
-    Route::post('module-items/{moduleItem}/reorder', [ModuleItemController::class, 'reorder']);
+    // Submission routes
+    Route::get('/submissions', [SubmissionController::class, 'index']);
+    Route::post('/submissions', [SubmissionController::class, 'store']);
+    Route::get('/submissions/{submission}', [SubmissionController::class, 'show']);
+    Route::put('/submissions/{submission}', [SubmissionController::class, 'update']);
+    Route::post('/submissions/{submission}/grade', [SubmissionController::class, 'grade']);
+    Route::get('/user/submissions', [SubmissionController::class, 'userSubmissions']);
 
-    // Questions
-    Route::apiResource('assignments.questions', QuestionController::class)->shallow();
+    // Progress routes
+    Route::get('/progress/my-progress', [ProgressController::class, 'myProgress']);
+    Route::get('/user/progress', [ProgressController::class, 'userProgress']);
+    Route::post('/progress', [ProgressController::class, 'store']);
+    Route::put('/progress/{progress}', [ProgressController::class, 'update']);
+    Route::post('/progress/bulk-update', [ProgressController::class, 'bulkUpdate']);
 
-    // Options
-    Route::apiResource('assignments.questions.options', OptionController::class)->shallow();
+    // Question routes
+    Route::apiResource('module-items.questions', QuestionController::class)->shallow();
 
-    // Answers
-    Route::apiResource('assignments.questions.answers', AnswerController::class)->shallow();
+    // Option routes
+    Route::apiResource('module-items.questions.options', OptionController::class)->shallow();
 
-    // Submissions
-    Route::get('courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'index']);
-    Route::post('courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'store']);
-    Route::get('courses/{course}/assignments/{assignment}/submissions/{submission}', [SubmissionController::class, 'show']);
-    Route::get('my-submissions', [SubmissionController::class, 'mySubmissions']);
-    Route::patch('submissions/{submission}', [SubmissionController::class, 'update']);
-    
-    // Instructor Assignment Submissions
-    Route::get('instructor/courses/{course}/assignments/{assignment}/submissions', [SubmissionController::class, 'index']);
+    // Answer routes
+    Route::apiResource('module-items.questions.answers', AnswerController::class)->shallow();
 
-    // Progress
-    Route::get('/my-progress',               [ProgressController::class, 'myProgress']);
-    Route::post('/assignments/{assignment}/progress',  [ProgressController::class, 'store']);
-    Route::get('/assignments/{assignment}/progress',   [ProgressController::class, 'index']);
-    Route::get('/progress/{progress}',       [ProgressController::class, 'show']);
-    Route::patch('/progress/{progress}',     [ProgressController::class, 'update']);
-    Route::delete('/progress/{progress}',    [ProgressController::class, 'destroy']);
+    // Grade routes
+    Route::get('grades/{grade}', [GradeController::class, 'show']);
+    Route::put('grades/{grade}', [GradeController::class, 'update']);
+    Route::delete('grades/{grade}', [GradeController::class, 'destroy']);
+    Route::get('students/{student}/grades', [GradeController::class, 'studentGrades']);
 
     // Notification routes
-    Route::get('/notifications', [NotificationController::class, 'index']);
-    Route::get('/notifications/unread', [NotificationController::class, 'unread']);
-    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
-    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('unread', [NotificationController::class, 'unread']);
+        Route::post('{id}/read', [NotificationController::class, 'markAsRead']);
+        Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
+        Route::delete('{id}', [NotificationController::class, 'destroy']);
+    });
+
+    // Announcement routes
+    Route::put('announcements/{announcement}', [AnnouncementController::class, 'update']);
+    Route::delete('announcements/{announcement}', [AnnouncementController::class, 'destroy']);
 });

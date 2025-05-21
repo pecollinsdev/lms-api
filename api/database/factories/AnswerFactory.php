@@ -3,9 +3,9 @@
 namespace Database\Factories;
 
 use App\Models\Answer;
+use App\Models\ModuleItem;
 use App\Models\Question;
 use App\Models\User;
-use App\Models\Assignment;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class AnswerFactory extends Factory
@@ -16,7 +16,7 @@ class AnswerFactory extends Factory
     {
         return [
             'user_id'            => User::factory()->state(['role'=>'student']),
-            'assignment_id'      => Assignment::factory(),
+            'module_item_id'      => ModuleItem::factory(),
             'question_id'        => Question::factory(),
             'answer_text'        => $this->faker->paragraph(),
             'selected_option_id' => null,

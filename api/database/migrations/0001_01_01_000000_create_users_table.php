@@ -29,6 +29,20 @@ return new class extends Migration
             $table->string('profile_picture')
                   ->nullable()
                   ->comment('Path to profile image');
+            
+            // Contact and instructor information
+            $table->string('phone_number')
+                  ->nullable()
+                  ->comment('User contact number');
+            $table->string('instructor_code')
+                  ->nullable()
+                  ->comment('Unique code for instructor verification');
+            $table->string('academic_specialty')
+                  ->nullable()
+                  ->comment('Instructor\'s field of expertise');
+            $table->text('qualifications')
+                  ->nullable()
+                  ->comment('Instructor\'s academic and professional qualifications');
 
             $table->rememberToken();
             $table->timestamps();

@@ -37,15 +37,14 @@ class AuthController extends Controller
             $data = array_merge($data, $instructorData);
         }
 
-        $data['password'] = Hash::make($data['password']);
-        $user = User::create($data);
-
-        // If user is an instructor, mark the instructor code as used
-        if ($user->role === 'instructor') {
-            DB::table('instructor_codes')
-                ->where('code', $data['instructor_code'])
-                ->update(['used' => true]);
+        // Create user and validate instructor code if needed
+        if ($data['role'] === 'instructor') {
+            if (!User::validateAndUseInstructorCode($data['instructor_code'])) {
+                return $this->respondBadRequest('Invalid or already used instructor code');
+            }
         }
+
+        $user = User::createUser($data);
 
         // Generate token
         $token = JWTAuth::fromUser($user);
@@ -74,8 +73,8 @@ class AuthController extends Controller
             'password' => 'required|string|min:8',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
-        if (! $user || ! Hash::check($data['password'], $user->password)) {
+        $user = User::findByEmail($data['email']);
+        if (!$user || !$user->validateCredentials($data['password'])) {
             return $this->respondUnauthorized('Invalid credentials');
         }
 

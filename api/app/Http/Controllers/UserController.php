@@ -39,16 +39,7 @@ class UserController extends Controller
             'profile_picture' => 'nullable|image|max:2048', // jpeg/png, max 2 MB
         ]);
 
-        $data['password'] = Hash::make($data['password']);
-
-        // Handle profile picture upload if present
-        if ($request->hasFile('profile_picture')) {
-            $data['profile_picture'] = $request
-            ->file('profile_picture')
-            ->store('profiles', 'public');
-        }
-
-        $user = User::create($data);
+        $user = User::createUserWithProfile($data, $request->file('profile_picture'));
 
         return $this->respondCreated($user);
     }
@@ -85,24 +76,7 @@ class UserController extends Controller
         }
 
         $data = $this->validated($request, $rules);
-
-        if (!empty($data['password'])) {
-            $data['password'] = Hash::make($data['password']);
-        } else {
-            unset($data['password']);
-        }
-
-        // Handle profile picture upload
-        if ($request->hasFile('profile_picture')) {
-            // Optionally delete old picture here...
-            $data['profile_picture'] = $request
-            ->file('profile_picture')
-            ->store('profiles', 'public');
-        } else {
-        unset($data['profile_picture']);
-        }
-
-        $user->update($data);
+        $user->updateWithProfile($data, $request->file('profile_picture'));
 
         return $this->respond($user, 'User updated');
     }

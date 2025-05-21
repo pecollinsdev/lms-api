@@ -18,7 +18,7 @@ class ModuleController extends Controller
         $this->authorize('viewAny', [Module::class, $course]);
 
         $modules = $course->modules()
-            ->with('items') // Eager load module items
+            ->with('moduleItems') // Eager load module items
             ->orderBy('created_at')
             ->paginate(15);
 
@@ -53,7 +53,7 @@ class ModuleController extends Controller
     {
         $this->authorize('view', $module);
 
-        $module->load('items'); // Eager load module items
+        $module->load('moduleItems'); // Eager load module items
         return $this->respond($module);
     }
 
@@ -88,5 +88,29 @@ class ModuleController extends Controller
         $module->delete();
 
         return $this->respond(null, 'Module deleted', Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * GET /api/modules/{module}/items
+     * List all items in a module for the student
+     */
+    public function items(Module $module)
+    {
+        $this->authorize('view', $module);
+
+        $userId = request()->user()->id;
+        $items = $module->moduleItems()
+            ->with([
+                'submissions' => function ($query) use ($userId) {
+                    $query->where('user_id', $userId);
+                },
+                'progress' => function ($query) use ($userId) {
+                    $query->where('user_id', $userId);
+                }
+            ])
+            ->orderBy('order')
+            ->get();
+
+        return response()->json($items);
     }
 } 

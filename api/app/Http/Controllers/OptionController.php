@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Assignment;
 use App\Models\Question;
 use App\Models\Option;
 use Illuminate\Http\Request;
@@ -11,23 +10,33 @@ use Symfony\Component\HttpFoundation\Response;
 class OptionController extends Controller
 {
     /**
-     * GET /api/assignments/{assignment}/questions/{question}/options
+     * GET /api/questions/{question}/options
      */
-    public function index(Assignment $assignment, Question $question)
+    public function index(Question $question)
     {
-        $this->authorize('viewAny', [Option::class, $question]);
+        try {
+            $this->authorize('viewAny', [Option::class, $question]);
 
-        $options = $question->options()
-            ->orderBy('order')
-            ->paginate(15);
+            $options = $question->options()
+                ->orderBy('order')
+                ->get();
 
-        return $this->respond($options);
+            return response()->json([
+                'status' => 'success',
+                'data' => $options
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
     }
 
     /**
-     * POST /api/assignments/{assignment}/questions/{question}/options
+     * POST /api/questions/{question}/options
      */
-    public function store(Request $request, Assignment $assignment, Question $question)
+    public function store(Request $request, Question $question)
     {
         $this->authorize('create', [Option::class, $question]);
 

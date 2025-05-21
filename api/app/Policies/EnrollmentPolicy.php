@@ -18,7 +18,8 @@ class EnrollmentPolicy
 
     public function create(User $user)
     {
-        return $user->isStudent();
+        // Allow students to self-enroll or instructors to enroll students in their courses
+        return $user->isStudent() || $user->isInstructor();
     }
 
     public function delete(User $user, Enrollment $enrollment)

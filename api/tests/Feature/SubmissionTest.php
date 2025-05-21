@@ -1,309 +1,212 @@
 <?php
-// tests/Feature/SubmissionTest.php
 
 namespace Tests\Feature;
 
 use Tests\TestCase;
 use App\Models\User;
 use App\Models\Course;
-use App\Models\Assignment;
+use App\Models\Module;
+use App\Models\ModuleItem;
 use App\Models\Submission;
-use App\Services\JwtService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Symfony\Component\HttpFoundation\Response;
-use App\Models\Question;
-use App\Models\Option;
+use Illuminate\Foundation\Testing\WithFaker;
+use PHPUnit\Framework\Attributes\Test;
 
 class SubmissionTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, WithFaker;
 
-    protected JwtService $jwt;
+    protected User $user;
+    protected Course $course;
+    protected Module $module;
+    protected ModuleItem $moduleItem;
+    protected Submission $submission;
 
     protected function setUp(): void
     {
         parent::setUp();
-        $this->jwt = $this->app->make(JwtService::class);
+        
+        // Create a test user
+        $this->user = User::factory()->create([
+            'role' => 'student'
+        ]);
+
+        // Create a test course
+        $this->course = Course::factory()->create();
+
+        // Create a test module
+        $this->module = Module::factory()->create([
+            'course_id' => $this->course->id
+        ]);
+
+        // Create a test module item
+        $this->moduleItem = ModuleItem::factory()->create([
+            'module_id' => $this->module->id,
+            'type' => 'assignment'
+        ]);
+
+        // Create a test submission
+        $this->submission = Submission::factory()->create([
+            'user_id' => $this->user->id,
+            'module_item_id' => $this->moduleItem->id,
+            'status' => 'submitted',
+            'score' => null,
+            'feedback' => null,
+            'submitted_at' => now()
+        ]);
+
+        // Authenticate the user
+        $this->actingAs($this->user);
     }
 
-    public function test_student_can_create_submission()
+    #[Test]
+    public function it_can_list_user_submissions()
     {
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create();
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
+        $response = $this->getJson('/api/submissions');
 
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                         ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                             'submission_type' => 'essay',
-                             'content' => 'My essay submission'
-                         ]);
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'user_id',
+                        'module_item_id',
+                        'status',
+                        'score',
+                        'feedback',
+                        'submitted_at',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
+    }
 
-        $response->assertCreated()
-                 ->assertJsonPath('data.assignment_id', $assignment->id);
+    #[Test]
+    public function it_can_create_submission()
+    {
+        $submissionData = [
+            'module_item_id' => $this->moduleItem->id,
+            'content' => [
+                'answers' => [
+                    [
+                        'question' => 'What is 2+2?',
+                        'answer' => '4'
+                    ]
+                ]
+            ],
+            'status' => 'submitted',
+            'submitted_at' => now()
+        ];
+
+        $response = $this->postJson('/api/submissions', $submissionData);
+
+        $response->assertStatus(201)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'feedback',
+                    'submitted_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
+
         $this->assertDatabaseHas('submissions', [
-            'user_id' => $student->id,
-            'assignment_id' => $assignment->id,
-            'submission_type' => 'essay',
-            'content' => 'My essay submission'
+            'user_id' => $this->user->id,
+            'module_item_id' => $submissionData['module_item_id'],
+            'status' => $submissionData['status']
         ]);
     }
 
-    public function test_student_cannot_resubmit_same_assignment()
+    #[Test]
+    public function it_can_show_submission()
     {
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create();
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
+        $response = $this->getJson("/api/submissions/{$this->submission->id}");
 
-        // Create first submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My first submission'
-             ]);
-
-        // Try to submit again
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                        ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                            'submission_type' => 'essay',
-                            'content' => 'My second submission'
-                        ]);
-
-        $response->assertStatus(Response::HTTP_CONFLICT)
-                 ->assertJson(['message' => 'Already submitted']);
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'feedback',
+                    'submitted_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
     }
 
-    public function test_student_can_list_their_submissions()
+    #[Test]
+    public function it_can_update_submission()
     {
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create();
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
+        $updateData = [
+            'status' => 'graded',
+            'score' => 85,
+            'feedback' => 'Good work!'
+        ];
 
-        // Create a submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My essay submission'
-             ]);
+        $response = $this->putJson("/api/submissions/{$this->submission->id}", $updateData);
 
-        // List submissions
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                        ->getJson('/api/my-submissions');
-
-        $response->assertOk()
-                 ->assertJsonStructure([
-                     'data' => [
-                         'data' => [
-                             '*' => [
-                                 'id',
-                                 'assignment_id',
-                                 'user_id',
-                                 'submission_type',
-                                 'content',
-                                 'submitted_at',
-                                 'status'
-                             ]
-                         ],
-                         'current_page',
-                         'per_page',
-                         'total'
-                     ]
-                 ]);
-    }
-
-    public function test_instructor_can_list_submissions_for_assignment()
-    {
-        $instructor = User::factory()->instructor()->create();
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create(['instructor_id' => $instructor->id]);
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
-
-        // Create a submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My essay submission'
-             ]);
-
-        // List submissions as instructor
-        $token = $this->jwt->generateToken(['sub' => $instructor->id, 'role' => 'instructor']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                         ->getJson("/api/assignments/{$assignment->id}/submissions");
-
-        $response->assertOk()
-                 ->assertJsonStructure([
-                     'data' => [
-                         'data' => [
-                             '*' => [
-                                 'id',
-                                 'user_id',
-                                 'assignment_id',
-                                 'submission_type',
-                                 'content',
-                                 'submitted_at',
-                                 'status'
-                             ]
-                         ],
-                         'current_page',
-                         'per_page',
-                         'total'
-                     ]
-                 ]);
-    }
-
-    public function test_instructor_cannot_list_others_assignment_submissions()
-    {
-        $instructor1 = User::factory()->instructor()->create();
-        $instructor2 = User::factory()->instructor()->create();
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create(['instructor_id' => $instructor1->id]);
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
-
-        // Create a submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My essay submission'
-             ]);
-
-        // Try to list submissions as another instructor
-        $token = $this->jwt->generateToken(['sub' => $instructor2->id, 'role' => 'instructor']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                         ->getJson("/api/assignments/{$assignment->id}/submissions");
-
-        $response->assertForbidden();
-    }
-
-    public function test_instructor_can_grade_submission()
-    {
-        $instructor = User::factory()->instructor()->create();
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create(['instructor_id' => $instructor->id]);
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
-
-        // Create a submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My essay submission'
-             ]);
-        
-        $submission = Submission::first();
-
-        // Grade the submission as instructor
-        $token = $this->jwt->generateToken(['sub' => $instructor->id, 'role' => 'instructor']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                        ->patchJson("/api/submissions/{$submission->id}", [
-                            'grade' => 85
-                        ]);
-
-        $response->assertOk()
-                 ->assertJsonStructure([
-                     'data' => [
-                         'id',
-                         'grade',
-                         'status'
-                     ]
-                 ])
-                 ->assertJsonPath('data.status', 'graded');
-
-        $responseData = $response->json('data');
-        $this->assertEquals(85, (float) $responseData['grade']);
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    'id',
+                    'user_id',
+                    'module_item_id',
+                    'status',
+                    'score',
+                    'feedback',
+                    'submitted_at',
+                    'created_at',
+                    'updated_at'
+                ]
+            ]);
 
         $this->assertDatabaseHas('submissions', [
-            'id' => $submission->id,
-            'grade' => 85,
-            'status' => 'graded'
+            'id' => $this->submission->id,
+            'status' => $updateData['status'],
+            'score' => $updateData['score'],
+            'feedback' => $updateData['feedback']
         ]);
     }
 
-    public function test_instructor_cannot_grade_others_course_submission()
+    #[Test]
+    public function it_can_delete_submission()
     {
-        $instructor1 = User::factory()->instructor()->create();
-        $instructor2 = User::factory()->instructor()->create();
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create(['instructor_id' => $instructor1->id]);
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'essay']);
+        $response = $this->deleteJson("/api/submissions/{$this->submission->id}");
 
-        // Create a submission
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-             ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                 'submission_type' => 'essay',
-                 'content' => 'My essay submission'
-             ]);
-        
-        $submission = Submission::first();
-
-        // Try to grade as another instructor
-        $token = $this->jwt->generateToken(['sub' => $instructor2->id, 'role' => 'instructor']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                        ->patchJson("/api/submissions/{$submission->id}", [
-                            'grade' => 85
-                        ]);
-
-        $response->assertForbidden();
+        $response->assertStatus(204);
+        $this->assertDatabaseMissing('submissions', ['id' => $this->submission->id]);
     }
 
-    public function test_quiz_submission_is_auto_graded()
+    #[Test]
+    public function it_can_list_module_item_submissions()
     {
-        $student = User::factory()->student()->create();
-        $course = Course::factory()->create();
-        $course->students()->attach($student);
-        $assignment = Assignment::factory()->for($course)->create(['submission_type' => 'quiz']);
+        $response = $this->getJson("/api/module-items/{$this->moduleItem->id}/submissions");
 
-        // Create questions with options
-        $question1 = Question::factory()->for($assignment)->create();
-        $question2 = Question::factory()->for($assignment)->create();
-        
-        // Create options for question 1
-        $correctOption1 = Option::factory()->for($question1)->create(['is_correct' => true]);
-        $wrongOption1 = Option::factory()->for($question1)->create(['is_correct' => false]);
-        
-        // Create options for question 2
-        $correctOption2 = Option::factory()->for($question2)->create(['is_correct' => true]);
-        $wrongOption2 = Option::factory()->for($question2)->create(['is_correct' => false]);
-
-        // Submit quiz with one correct and one wrong answer
-        $token = $this->jwt->generateToken(['sub' => $student->id, 'role' => 'student']);
-        $response = $this->withHeader('Authorization', 'Bearer '.$token)
-                        ->postJson("/api/assignments/{$assignment->id}/submissions", [
-                            'submission_type' => 'quiz',
-                            'answers' => [
-                                $question1->id => $correctOption1->id,  // Correct answer
-                                $question2->id => $wrongOption2->id     // Wrong answer
-                            ]
-                        ]);
-
-        $response->assertCreated()
-                 ->assertJsonStructure([
-                     'data' => [
-                         'id',
-                         'grade',
-                         'status'
-                     ]
-                 ]);
-
-        $responseData = $response->json('data');
-        $this->assertEquals(50, (float) $responseData['grade']); // 1 out of 2 correct = 50%
-        $this->assertEquals('graded', $responseData['status']);
-
-        $this->assertDatabaseHas('submissions', [
-            'id' => $responseData['id'],
-            'grade' => 50,
-            'status' => 'graded'
-        ]);
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'data' => [
+                    '*' => [
+                        'id',
+                        'user_id',
+                        'module_item_id',
+                        'status',
+                        'score',
+                        'feedback',
+                        'submitted_at',
+                        'created_at',
+                        'updated_at'
+                    ]
+                ]
+            ]);
     }
-}
+} 

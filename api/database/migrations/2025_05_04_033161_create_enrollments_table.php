@@ -19,6 +19,10 @@ return new class extends Migration
             $table->timestamp('enrolled_at')->useCurrent();
             $table->enum('status', ['pending','active','completed'])
                   ->default('active');
+            $table->foreignId('enrolled_by')
+                  ->nullable()
+                  ->constrained('users')
+                  ->nullOnDelete();
             $table->timestamps();
             $table->softDeletes();
         });

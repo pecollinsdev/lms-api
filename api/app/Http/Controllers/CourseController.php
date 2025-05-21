@@ -5,8 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Course;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use App\Models\Progress;
-use App\Models\Submission;
+use App\Http\Resources\CourseResource;
+use App\Http\Resources\ModuleItemResource;
+use App\Http\Resources\UserResource;
+use App\Models\User;
+use App\Http\Resources\ModuleResource;
 
 class CourseController extends Controller
 {
@@ -18,38 +21,14 @@ class CourseController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
-
-        // authorize listing
         $this->authorize('viewAny', Course::class);
-
-        if ($user->isInstructor()) {
-            $courses = Course::where('instructor_id', $user->id)
-                            ->with(['instructor', 'students', 'assignments', 'modules.items'])
-                            ->paginate(15);
-        } else {
-            $courses = Course::published()
-                            ->with(['instructor', 'students', 'assignments', 'modules.items'])
-                            ->paginate(15);
-        }
-
-        // Add computed fields to each course
-        $courses->getCollection()->transform(function ($course) use ($user) {
-            $course->student_count = $course->students->count();
-            $course->assignment_count = $course->assignments->count();
-            $course->module_count = $course->modules->count();
-            $course->total_items = $course->modules->sum(function ($module) {
-                return $module->items->count();
-            });
-            
-            // Add enrollment status for students
-            if ($user->isStudent()) {
-                $course->is_enrolled = $course->students()->where('user_id', $user->id)->exists();
-            }
-
-            return $course;
-        });
-
-        return $this->respond($courses);
+        
+        $courses = Course::getCourses([
+            'instructor_id' => $user->isInstructor() ? $user->id : null,
+            'is_published' => !$user->isInstructor()
+        ], true, true);
+        
+        return CourseResource::collection($courses);
     }
 
     /**
@@ -70,12 +49,10 @@ class CourseController extends Controller
             'cover_image'   => 'nullable|string',
         ]);
 
-        // tie course to the current instructor
         $data['instructor_id'] = $request->user()->id;
-
         $course = Course::create($data);
 
-        return $this->respondCreated($course);
+        return new CourseResource($course);
     }
 
     /**
@@ -85,18 +62,22 @@ class CourseController extends Controller
     public function show(Course $course)
     {
         $this->authorize('view', $course);
+        
+        $course->load(['instructor', 'students' => function($query) {
+            $query->withPivot(['enrolled_at', 'status']);
+        }, 'modules.moduleItems']);
+        
+        return new CourseResource($course);
+    }
 
-        // Load relationships including modules and their items
-        $course->load(['instructor', 'students', 'assignments', 'modules.items']);
-
-        // Add computed fields
-        $course->student_count = $course->students->count();
-        $course->assignment_count = $course->assignments->count();
-
-        // Optionally, remove assignments from the response if you want to only use modules/module items
-        // unset($course->assignments);
-
-        return $this->respond($course);
+    /**
+     * GET /api/courses/{course}/module-items
+     * Returns a list of module items for the course
+     */
+    public function moduleItems(Course $course)
+    {
+        $this->authorize('view', $course);
+        return ModuleItemResource::collection($course->getAllModuleItems());
     }
 
     /**
@@ -119,7 +100,7 @@ class CourseController extends Controller
 
         $course->update($data);
 
-        return $this->respond($course, 'Course updated');
+        return new CourseResource($course);
     }
 
     /**
@@ -130,107 +111,142 @@ class CourseController extends Controller
     {
         $this->authorize('delete', $course);
 
-        $course->delete();
+        $course->forceDelete();
 
         return $this->respond(null, 'Course deleted', Response::HTTP_NO_CONTENT);
     }
 
     /**
-     * GET /api/courses/{course}/students
-     * Returns a list of students enrolled in the course
-     */
-    public function students(Course $course)
-    {
-        $this->authorize('view', $course);
-
-        $students = $course->students()
-            ->with(['profile']) // Load any additional student details
-            ->paginate(15);
-
-        return $this->respond($students);
-    }
-
-    /**
-     * GET /api/courses/{course}/assignments
-     * Returns a list of assignments for the course
-     */
-    public function assignments(Course $course)
-    {
-        $this->authorize('view', $course);
-
-        $assignments = $course->assignments()
-            ->with(['submissions']) // Load submissions for total count
-            ->paginate(15);
-
-        // Add total submissions count to each assignment
-        $assignments->getCollection()->transform(function ($assignment) {
-            $assignment->total_submissions = $assignment->submissions->count();
-            return $assignment;
-        });
-
-        return $this->respond($assignments);
-    }
-
-    /**
-     * GET /api/courses/{course}/progress
-     * Returns progress data for the course
-     */
-    public function progress(Course $course)
-    {
-        $this->authorize('view', $course);
-
-        $user = request()->user();
-        
-        if ($user->isStudent()) {
-            // For students, return their own progress
-            $progress = Progress::whereIn('assignment_id', $course->assignments->pluck('id'))
-                ->where('user_id', $user->id)
-                ->with('assignment')
-                ->get();
-        } else {
-            // For instructors, return all students' progress
-            $progress = Progress::whereIn('assignment_id', $course->assignments->pluck('id'))
-                ->with(['user', 'assignment'])
-                ->paginate(15);
-        }
-
-        return $this->respond($progress);
-    }
-
-    /**
      * GET /api/courses/{course}/statistics
-     * Returns aggregate statistics for the course
+     * Get course statistics
      */
     public function statistics(Course $course)
     {
         $this->authorize('view', $course);
 
-        // Get basic counts
-        $student_count = $course->students()->count();
-        $assignment_count = $course->assignments()->count();
+        $options = [
+            'student_count' => true,
+            'module_count' => true,
+            'item_count' => true,
+            'completion' => true,
+            'grade' => true,
+        ];
 
-        // Calculate average grade
-        $submissions = Submission::whereIn('assignment_id', $course->assignments->pluck('id'))
-            ->whereNotNull('grade')
+        $stats = $course->getStatistics($options);
+
+        return response()->json($stats);
+    }
+
+    /**
+     * GET /api/courses/{course}/students
+     * Get paginated student data with optional completion tracking
+     */
+    public function students(Course $course)
+    {
+        $this->authorize('view', $course);
+
+        $withCompleted = request()->boolean('with_completed');
+        $perPage = request()->integer('per_page', 15);
+
+        $students = $course->students()
+            ->withPivot(['enrolled_at', 'status'])
+            ->paginate($perPage);
+
+        return response()->json($students);
+    }
+
+    /**
+     * POST /api/courses/{course}/enroll
+     * Enroll a student in the course
+     */
+    public function enroll(Request $request, Course $course)
+    {
+        $this->authorize('enroll', $course);
+
+        $data = $this->validated($request, [
+            'student_id' => 'required|exists:users,id',
+            'enrolled_by' => 'required|exists:users,id',
+        ]);
+
+        $student = User::findOrFail($data['student_id']);
+        $enrolledBy = User::findOrFail($data['enrolled_by']);
+
+        $result = $course->handleEnrollment($student, [
+            'enrolled_by' => $enrolledBy->id,
+            'enrolled_at' => now(),
+            'status' => 'active'
+        ]);
+
+        if (!$result) {
+            return response()->json([
+                'message' => 'Failed to enroll student in course'
+            ], Response::HTTP_BAD_REQUEST);
+        }
+
+        return response()->json([
+            'message' => 'Student enrolled successfully',
+            'data' => new CourseResource($course)
+        ]);
+    }
+
+    /**
+     * DELETE /api/courses/{course}/unenroll/{student}
+     * Unenroll a student from the course
+     */
+    public function unenroll(Course $course, User $student)
+    {
+        $this->authorize('unenroll', [$course, $student]);
+
+        $enrollment = $course->enrollments()
+            ->where('user_id', $student->id)
+            ->first();
+
+        if (!$enrollment) {
+            return response()->json([
+                'message' => 'Student is not enrolled in this course'
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        $enrollment->delete();
+
+        return response()->json([
+            'message' => 'Student unenrolled successfully',
+            'data' => new CourseResource($course)
+        ]);
+    }
+
+    /**
+     * GET /api/courses/{course}/progress
+     * Get progress statistics for a course
+     */
+    public function progress(Course $course)
+    {
+        $this->authorize('view', $course);
+
+        $stats = $course->getStatistics([
+            'student_count' => true,
+            'module_count' => true,
+            'item_count' => true,
+            'completion' => true,
+            'grade' => true
+        ]);
+
+        return response()->json($stats);
+    }
+
+    /**
+     * GET /api/courses/{course}/modules
+     * List all modules for a course
+     */
+    public function modules(Course $course)
+    {
+        $this->authorize('view', $course);
+        
+        $modules = $course->modules()
+            ->with('moduleItems')
+            ->orderBy('created_at')
             ->get();
         
-        $average_grade = $submissions->count() > 0 
-            ? round($submissions->avg('grade'), 2) 
-            : null;
-
-        // Get completion rates
-        $total_possible_submissions = $student_count * $assignment_count;
-        $actual_submissions = $submissions->count();
-        $completion_rate = $total_possible_submissions > 0 
-            ? round(($actual_submissions / $total_possible_submissions) * 100, 2) 
-            : 0;
-
-        return $this->respond([
-            'student_count' => $student_count,
-            'assignment_count' => $assignment_count,
-            'average_grade' => $average_grade,
-            'completion_rate' => $completion_rate,
-            'total_submissions' => $actual_submissions,
-        ]);
+        return ModuleResource::collection($modules);
     }
 }

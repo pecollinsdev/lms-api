@@ -22,13 +22,61 @@ class ModuleItemFactory extends Factory
      */
     public function definition(): array
     {
+        $type = $this->faker->randomElement(['video', 'document', 'quiz', 'assignment']);
+        $contentData = [];
+        $settings = [];
+
+        switch ($type) {
+            case 'video':
+                $contentData = [
+                    'video_url' => $this->faker->url,
+                    'video_provider' => $this->faker->randomElement(['youtube', 'vimeo']),
+                    'video_duration' => $this->faker->numberBetween(60, 3600),
+                    'video_allow_download' => $this->faker->boolean,
+                ];
+                break;
+            case 'document':
+                $contentData = [
+                    'document_url' => $this->faker->url,
+                    'document_type' => $this->faker->randomElement(['pdf', 'doc', 'docx']),
+                    'document_size' => $this->faker->numberBetween(100, 10000),
+                    'document_allow_download' => $this->faker->boolean,
+                ];
+                break;
+            case 'quiz':
+                $contentData = [
+                    'quiz_instructions' => $this->faker->paragraph,
+                ];
+                $settings = [
+                    'max_attempts' => $this->faker->numberBetween(1, 3),
+                    'show_correct_answers' => $this->faker->boolean,
+                    'show_feedback' => $this->faker->boolean,
+                    'passing_score' => $this->faker->numberBetween(60, 100),
+                ];
+                break;
+            case 'assignment':
+                $contentData = [
+                    'assignment_instructions' => $this->faker->paragraph,
+                ];
+                $settings = [
+                    'max_attempts' => $this->faker->numberBetween(1, 3),
+                    'allow_late_submission' => $this->faker->boolean,
+                    'late_submission_penalty' => $this->faker->numberBetween(5, 20),
+                ];
+                break;
+        }
+
         return [
             'module_id' => Module::factory(),
-            'type' => $this->faker->randomElement(['video', 'assignment', 'quiz', 'document']),
-            'title' => $this->faker->sentence(3),
-            'description' => $this->faker->paragraph(),
-            'due_date' => $this->faker->dateTimeBetween('+1 week', '+2 weeks'),
-            'order' => $this->faker->numberBetween(0, 100),
+            'type' => $type,
+            'title' => $this->faker->sentence,
+            'description' => $this->faker->paragraph,
+            'due_date' => $this->faker->dateTimeBetween('now', '+1 month'),
+            'order' => $this->faker->numberBetween(1, 100),
+            'max_score' => $this->faker->numberBetween(10, 100),
+            'submission_type' => $type === 'quiz' ? 'multiple_choice' : 'file',
+            'content_data' => $contentData,
+            'settings' => $settings,
         ];
     }
 
@@ -39,6 +87,12 @@ class ModuleItemFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'type' => 'video',
+            'content_data' => [
+                'video_url' => $this->faker->url,
+                'video_provider' => 'youtube',
+                'video_duration' => $this->faker->time('H:i:s'),
+                'video_allow_download' => false
+            ]
         ]);
     }
 
@@ -49,6 +103,9 @@ class ModuleItemFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'type' => 'assignment',
+            'content_data' => [
+                'assignment_instructions' => $this->faker->paragraph
+            ]
         ]);
     }
 
@@ -59,6 +116,16 @@ class ModuleItemFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'type' => 'quiz',
+            'content_data' => [
+                'questions' => [
+                    [
+                        'question' => $this->faker->sentence . '?',
+                        'options' => $this->faker->words(4),
+                        'correct_answer' => $this->faker->word
+                    ]
+                ]
+            ],
+            'submission_type' => 'multiple_choice'
         ]);
     }
 
@@ -69,6 +136,12 @@ class ModuleItemFactory extends Factory
     {
         return $this->state(fn (array $attributes) => [
             'type' => 'document',
+            'content_data' => [
+                'document_url' => $this->faker->url,
+                'document_type' => 'pdf',
+                'document_size' => $this->faker->numberBetween(1, 50) . 'MB',
+                'document_allow_download' => true
+            ]
         ]);
     }
 

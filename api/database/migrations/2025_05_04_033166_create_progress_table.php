@@ -13,11 +13,12 @@ return new class extends Migration
             $table->foreignId('user_id')
                   ->constrained('users')
                   ->cascadeOnDelete();
-            $table->foreignId('assignment_id')
-                  ->constrained('assignments')
+            $table->foreignId('module_item_id')
+                  ->constrained('module_items')
                   ->cascadeOnDelete();
-            $table->enum('status', ['not_started', 'in_progress', 'completed'])
+            $table->enum('status', ['not_started', 'in_progress', 'submitted', 'graded', 'completed'])
                   ->default('not_started');
+            $table->timestamp('completed_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });

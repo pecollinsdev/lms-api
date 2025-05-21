@@ -54,4 +54,39 @@ class Enrollment extends Model
     {
         return $this->belongsTo(Course::class, 'course_id');
     }
+
+    /**
+     * Find an enrollment by user and course IDs
+     */
+    public static function findByUserAndCourse(int $userId, int $courseId): ?self
+    {
+        return static::where([
+            'user_id' => $userId,
+            'course_id' => $courseId,
+        ])->first();
+    }
+
+    /**
+     * Check if the enrollment is active
+     */
+    public function isActive(): bool
+    {
+        return $this->status === 'active';
+    }
+
+    /**
+     * Check if the enrollment is pending
+     */
+    public function isPending(): bool
+    {
+        return $this->status === 'pending';
+    }
+
+    /**
+     * Check if the enrollment is completed
+     */
+    public function isCompleted(): bool
+    {
+        return $this->status === 'completed';
+    }
 }

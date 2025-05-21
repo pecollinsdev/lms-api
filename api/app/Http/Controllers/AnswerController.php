@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Assignment;
+use App\Models\ModuleItem;
 use App\Models\Question;
 use App\Models\Answer;
+use App\Models\Submission;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
+use App\Http\Resources\AnswerResource;
 
 class AnswerController extends Controller
 {
@@ -15,15 +16,9 @@ class AnswerController extends Controller
      * GET /api/assignments/{assignment}/questions/{question}/answers
      * List all answers for a question (instructor only).
      */
-    public function index(Assignment $assignment, Question $question)
+    public function index(ModuleItem $moduleItem, Question $question)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-
-        // only the instructor who owns this assignment's course can list its answers
-        if (! $user->isInstructor() || $assignment->course->instructor_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
+        $this->authorize('viewAny', Answer::class);
 
         $answers = $question
             ->answers()
@@ -33,37 +28,56 @@ class AnswerController extends Controller
     }
 
     /**
-     * POST /api/assignments/{assignment}/questions/{question}/answers
-     * Submit an answer (student only).
+     * POST /api/module-items/{moduleItem}/questions/{question}/answers
+     * Submit an answer to a question
      */
-    public function store(Request $request, Assignment $assignment, Question $question)
+    public function store(Request $request, ModuleItem $moduleItem, Question $question)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
+        $this->authorize('create', [Answer::class, $moduleItem]);
 
-        // only a student enrolled in the course can submit
-        $isEnrolled = $user->enrolledCourses()
-                           ->where('course_id', $assignment->course_id)
-                           ->exists();
+        // Validate based on question type
+        if ($question->isMultipleChoice()) {
+            $data = $this->validated($request, [
+                'selected_option_id' => 'required|exists:options,id',
+                'submission_id' => 'required|exists:submissions,id',
+            ]);
 
-        if (! $user->isStudent() || ! $isEnrolled) {
-            abort(Response::HTTP_FORBIDDEN);
+            // Verify the option belongs to this question
+            if (!$question->options()->where('id', $data['selected_option_id'])->exists()) {
+                return response()->json([
+                    'message' => 'Invalid option for this question'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+        } else {
+            $data = $this->validated($request, [
+                'answer_text' => 'required|string',
+                'submission_id' => 'required|exists:submissions,id',
+            ]);
         }
 
-        $data = $request->validate([
-            'answer_text'        => 'nullable|string',
-            'selected_option_id' => 'nullable|exists:options,id',
-        ]);
+        // Check if user has already answered this question in this submission
+        $existingAnswer = Answer::where([
+            'user_id' => $request->user()->id,
+            'question_id' => $question->id,
+            'submission_id' => $data['submission_id'],
+        ])->first();
 
-        $answer = Answer::create([
-            'user_id'            => $user->id,
-            'assignment_id'      => $assignment->id,
-            'question_id'        => $question->id,
-            'answer_text'        => $data['answer_text'] ?? null,
+        if ($existingAnswer) {
+            return response()->json([
+                'message' => 'You have already answered this question'
+            ], Response::HTTP_CONFLICT);
+        }
+
+        // Create the answer
+        $answer = $question->answers()->create([
+            'user_id' => $request->user()->id,
+            'module_item_id' => $moduleItem->id,
+            'submission_id' => $data['submission_id'],
+            'answer_text' => $data['answer_text'] ?? null,
             'selected_option_id' => $data['selected_option_id'] ?? null,
         ]);
 
-        return $this->respondCreated($answer, 'Answer submitted');
+        return new AnswerResource($answer);
     }
 
     /**
@@ -72,39 +86,40 @@ class AnswerController extends Controller
      */
     public function show(Answer $answer)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-
-        $canView = $user->id === $answer->user_id
-            || ($user->isInstructor() && $answer->assignment->instructor_id === $user->id);
-
-        if (! $canView) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
+        $this->authorize('view', $answer);
 
         return $this->respond($answer);
     }
 
     /**
-     * PATCH /api/answers/{answer}
-     * Update an answer (owner only).
+     * PUT /api/answers/{answer}
+     * Update an answer
      */
     public function update(Request $request, Answer $answer)
     {
-        $user = Auth::user();
+        $this->authorize('update', $answer);
 
-        if ($user->id !== $answer->user_id) {
-            abort(Response::HTTP_FORBIDDEN);
+        // Validate based on question type
+        if ($answer->question->isMultipleChoice()) {
+            $data = $this->validated($request, [
+                'selected_option_id' => 'required|exists:options,id',
+            ]);
+
+            // Verify the option belongs to this question
+            if (!$answer->question->options()->where('id', $data['selected_option_id'])->exists()) {
+                return response()->json([
+                    'message' => 'Invalid option for this question'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+        } else {
+            $data = $this->validated($request, [
+                'answer_text' => 'required|string',
+            ]);
         }
-
-        $data = $request->validate([
-            'answer_text'        => 'nullable|string',
-            'selected_option_id' => 'nullable|exists:options,id',
-        ]);
 
         $answer->update($data);
 
-        return $this->respond($answer, 'Answer updated');
+        return new AnswerResource($answer);
     }
 
     /**
@@ -113,14 +128,42 @@ class AnswerController extends Controller
      */
     public function destroy(Answer $answer)
     {
-        $user = Auth::user();
-
-        if ($user->id !== $answer->user_id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
+        $this->authorize('delete', $answer);
 
         $answer->delete();
 
         return $this->respond(null, 'Answer removed', Response::HTTP_NO_CONTENT);
+    }
+
+    /**
+     * GET /api/module-items/{moduleItem}/questions/{question}/answers
+     * List all answers for a question (instructor only)
+     */
+    public function questionAnswers(ModuleItem $moduleItem, Question $question)
+    {
+        $this->authorize('viewAny', [Answer::class, $moduleItem]);
+
+        $answers = $question->answers()
+            ->with(['user:id,name,email', 'option'])
+            ->orderBy('created_at', 'desc')
+            ->paginate(15);
+
+        return AnswerResource::collection($answers);
+    }
+
+    /**
+     * GET /api/submissions/{submission}/answers
+     * List all answers for a submission
+     */
+    public function submissionAnswers(Submission $submission)
+    {
+        $this->authorize('view', $submission);
+
+        $answers = $submission->answers()
+            ->with(['question', 'option'])
+            ->orderBy('created_at')
+            ->get();
+
+        return AnswerResource::collection($answers);
     }
 }

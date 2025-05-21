@@ -10,8 +10,8 @@ return new class extends Migration
     {
         Schema::create('questions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('assignment_id')
-                  ->constrained('assignments')
+            $table->foreignId('module_item_id')
+                  ->constrained('module_items')
                   ->cascadeOnDelete();
             $table->enum('type', ['multiple_choice','text']);
             $table->text('prompt');

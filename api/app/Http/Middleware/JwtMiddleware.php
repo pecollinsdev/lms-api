@@ -15,7 +15,7 @@ class JwtMiddleware
     {
         try {
             // First try to get token from cookie
-            $token = $request->cookie('jwt_token');
+            $token = $request->cookie('token');
             
             // If not in cookie, try Authorization header
             if (!$token) {

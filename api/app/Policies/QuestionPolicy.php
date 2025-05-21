@@ -4,7 +4,7 @@ namespace App\Policies;
 
 use App\Models\Question;
 use App\Models\User;
-use App\Models\Assignment;
+use App\Models\ModuleItem;
 use Illuminate\Auth\Access\HandlesAuthorization;
 
 class QuestionPolicy
@@ -18,28 +18,28 @@ class QuestionPolicy
         }
     }
 
-    public function viewAny(User $user, Assignment $assignment)
+    public function viewAny(User $user, ModuleItem $moduleItem)
     {
-        return (new AssignmentPolicy)->view($user, $assignment);
+        return (new ModuleItemPolicy)->view($user, $moduleItem);
     }
 
     public function view(User $user, Question $question)
     {
-        return (new AssignmentPolicy)->view($user, $question->assignment);
+        return (new ModuleItemPolicy)->view($user, $question->moduleItem);
     }
 
-    public function create(User $user, Assignment $assignment)
+    public function create(User $user, ModuleItem $moduleItem)
     {
-        return $user->id === $assignment->course->instructor_id;
+        return (new ModuleItemPolicy)->update($user, $moduleItem);
     }
 
     public function update(User $user, Question $question)
     {
-        return $user->id === $question->assignment->course->instructor_id;
+        return (new ModuleItemPolicy)->update($user, $question->moduleItem);
     }
 
     public function delete(User $user, Question $question)
     {
-        return $user->id === $question->assignment->course->instructor_id;
+        return (new ModuleItemPolicy)->update($user, $question->moduleItem);
     }
 }

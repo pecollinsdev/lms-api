@@ -3,7 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Question;
-use App\Models\Assignment;
+use App\Models\ModuleItem;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class QuestionFactory extends Factory
@@ -22,16 +22,12 @@ class QuestionFactory extends Factory
      */
     public function definition(): array
     {
-        // Randomly choose question type
-        $type = $this->faker->randomElement(['multiple_choice', 'text']);
-
         return [
-            'assignment_id' => Assignment::factory(),
-            'type'          => $type,
-            'prompt'        => $this->faker->sentence(6),
-            'order'         => $this->faker->numberBetween(0, 10),
-            'points'        => $this->faker->randomFloat(2, 1, 10),
-            'settings'      => null,
+            'module_item_id' => ModuleItem::factory(),
+            'question_text' => $this->faker->sentence(),
+            'question_type' => $this->faker->randomElement(['multiple_choice', 'true_false', 'short_answer']),
+            'points' => $this->faker->numberBetween(1, 10),
+            'order' => $this->faker->numberBetween(1, 20),
         ];
     }
 
@@ -41,8 +37,8 @@ class QuestionFactory extends Factory
     public function multipleChoice(): self
     {
         return $this->state(fn (array $attributes) => [
-            'type'     => 'multiple_choice',
-            'prompt'   => $this->faker->sentence(6),
+            'question_type' => 'multiple_choice',
+            'question_text' => $this->faker->sentence(6),
             'settings' => ['shuffle' => $this->faker->boolean()],
         ]);
     }
@@ -53,8 +49,8 @@ class QuestionFactory extends Factory
     public function text(): self
     {
         return $this->state(fn (array $attributes) => [
-            'type'     => 'text',
-            'prompt'   => $this->faker->paragraph(),
+            'question_type' => 'text',
+            'question_text' => $this->faker->paragraph(),
             'settings' => null,
         ]);
     }

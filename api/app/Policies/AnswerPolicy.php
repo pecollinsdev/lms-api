@@ -16,19 +16,26 @@ class AnswerPolicy
         }
     }
 
-    public function create(User $user)
+    public function create(User $user): bool
     {
         return $user->isStudent();
     }
 
-    public function update(User $user, Answer $answer)
+    public function update(User $user, Answer $answer): bool
     {
-        return $answer->submission->user_id === $user->id;
+        return $user->id === $answer->user_id
+            || ($user->isInstructor() && $user->id === $answer->question->moduleItem->module->course->instructor_id);
     }
 
-    public function view(User $user, Answer $answer)
+    public function view(User $user, Answer $answer): bool
     {
-        return $this->update($user, $answer)
-            || ($user->isInstructor() && $user->id === $answer->question->assignment->course->instructor_id);
+        return $user->id === $answer->user_id
+            || ($user->isInstructor() && $user->id === $answer->question->moduleItem->module->course->instructor_id);
+    }
+
+    public function delete(User $user, Answer $answer): bool
+    {
+        return $user->id === $answer->user_id
+            || ($user->isInstructor() && $user->id === $answer->question->moduleItem->module->course->instructor_id);
     }
 }

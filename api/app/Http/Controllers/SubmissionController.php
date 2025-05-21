@@ -2,222 +2,226 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Course;
+use App\Models\ModuleItem;
 use App\Models\Submission;
-use App\Models\Assignment;
-use App\Models\Question;
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 use App\Http\Resources\SubmissionResource;
-use App\Notifications\AssignmentSubmitted;
-use App\Notifications\AssignmentGraded;
+use App\Notifications\ModuleItemSubmitted;
+use App\Notifications\ModuleItemGraded;
+use App\Models\Progress;
 
 class SubmissionController extends Controller
 {
     /**
-     * GET /api/courses/{course}/assignments/{assignment}/submissions
-     * List submissions for an assignment (instructor only).
+     * GET /api/courses/{course}/module-items/{item}/submissions
+     * List submissions for a module item (instructor only).
      */
-    public function index(Request $request, $course, $assignment)
+    public function index(Course $course, ModuleItem $moduleItem)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
+        $this->authorize('viewAny', Submission::class);
 
-        $assignment = Assignment::where('id', $assignment)
-            ->where('course_id', $course)
-            ->firstOrFail();
-
-        if (! $user->isInstructor() || $assignment->course->instructor_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
-
-        $submissions = $assignment->submissions()
-            ->with('student')  // Eager load the student relationship
+        $submissions = Submission::forModuleItem($moduleItem->id)
+            ->with(['user', 'submissionAnswers'])
             ->paginate(15);
 
-        return $this->respond($submissions);
+        return SubmissionResource::collection($submissions);
     }
 
     /**
-     * POST /api/courses/{course}/assignments/{assignment}/submissions
-     * Student creates a submission (file, essay, or quiz). Quizzes are auto-graded.
+     * POST /api/module-items/{moduleItem}/submissions
+     * Submit an assignment or quiz
      */
-    public function store(Request $request, $course, $assignment)
+    public function store(Request $request, ModuleItem $moduleItem)
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        if (! $user->isStudent()) {
-            abort(Response::HTTP_FORBIDDEN);
+        $this->authorize('create', [Submission::class, $moduleItem]);
+
+        // Validate submission based on module item type
+        $rules = $this->getSubmissionRules($moduleItem);
+        $data = $this->validated($request, $rules);
+
+        // Check if student has exceeded max attempts
+        if ($moduleItem->settings['max_attempts'] ?? null) {
+            $attempts = $moduleItem->submissions()
+                ->where('user_id', $request->user()->id)
+                ->count();
+
+            if ($attempts >= $moduleItem->settings['max_attempts']) {
+                return response()->json([
+                    'message' => 'Maximum number of attempts reached'
+                ], Response::HTTP_FORBIDDEN);
+            }
         }
 
-        $assignment = Assignment::where('id', $assignment)
-            ->where('course_id', $course)
-            ->firstOrFail();
+        // Handle late submission
+        if ($moduleItem->due_date && now()->gt($moduleItem->due_date)) {
+            if (!($moduleItem->settings['allow_late_submission'] ?? false)) {
+                return response()->json([
+                    'message' => 'Late submissions are not allowed'
+                ], Response::HTTP_FORBIDDEN);
+            }
 
-        $enrolled = $user->enrolledCourses()
-                         ->where('course_id', $assignment->course_id)
-                         ->exists();
-        if (! $enrolled) {
-            abort(Response::HTTP_FORBIDDEN);
+            // Apply late submission penalty if configured
+            if (isset($moduleItem->settings['late_submission_penalty'])) {
+                $data['late_penalty'] = $moduleItem->settings['late_submission_penalty'];
+            }
         }
 
-        $already = Submission::where('user_id', $user->id)
-            ->where('assignment_id', $assignment->id)
-            ->exists();
-        if ($already) {
-            return response()->json(
-                ['message' => 'Already submitted'],
-                Response::HTTP_CONFLICT
-            );
-        }
-
-        $data = $request->validate([
-            'submission_type' => 'required|in:file,essay,quiz',
-            'content'         => 'required_if:submission_type,essay|string',
-            'file_path'       => 'required_if:submission_type,file|string',
-            'answers'         => 'required_if:submission_type,quiz|array',
+        // Create submission
+        $submission = $moduleItem->submissions()->create([
+            'user_id' => $request->user()->id,
+            'content' => $data['content'],
+            'submission_type' => $moduleItem->submission_type,
+            'late_penalty' => $data['late_penalty'] ?? 0,
+            'status' => 'submitted',
         ]);
 
-        $submission = Submission::create([
-            'user_id'         => $user->id,
-            'assignment_id'   => $assignment->id,
-            'submission_type'=> $data['submission_type'],
-            'content'         => $data['content'] ?? null,
-            'file_path'       => $data['file_path'] ?? null,
-            'answers'         => $data['answers'] ?? null,
-            'submitted_at'    => now(),
-            'status'          => 'pending',
-        ]);
-
-        // Notify instructor
-        $instructor = $assignment->course->instructor;
-        if ($instructor) {
-            $instructor->notify(new AssignmentSubmitted($submission));
-        }
-
-        // auto-grade quizzes immediately
-        if ($submission->submission_type === 'quiz') {
-            $this->autoGradeQuiz($submission);
-            $submission->refresh();
-            return $this->respondCreated($submission, 'Quiz auto-graded');
-        }
-
-        return $this->respondCreated($submission, 'Submission created');
-    }
-
-    /**
-     * GET /api/my-submissions
-     * List current student's own submissions.
-     */
-    public function mySubmissions()
-    {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        if (! $user->isStudent()) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
-
-        $subs = $user->submissions()->paginate(15);
-        return $this->respond($subs);
-    }
-
-    /**
-     * GET /api/courses/{course}/assignments/{assignment}/submissions/{submission}
-     * Show a single submission (owner or instructor).
-     */
-    public function show($course, $assignment, $submission)
-    {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-
-        $assignment = Assignment::where('id', $assignment)
-            ->where('course_id', $course)
-            ->firstOrFail();
-
-        $submission = Submission::with(['assignment', 'student'])
-            ->where('id', $submission)
-            ->where('assignment_id', $assignment->id)
-            ->firstOrFail();
-
-        // students only see their own
-        if ($user->isStudent() && $submission->user_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
-        }
-
-        // instructors only see submissions in their course
-        if ($user->isInstructor() && $assignment->course->instructor_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
+        // Auto-grade quiz submissions
+        if ($moduleItem->isQuiz()) {
+            $this->autoGradeQuiz($submission, $moduleItem);
         }
 
         return new SubmissionResource($submission);
     }
 
     /**
-     * PATCH /api/submissions/{submission}
-     * Grade or re-grade a submission (instructor only).
+     * Get validation rules based on module item type
      */
-    public function update(Request $request, Submission $submission)
+    protected function getSubmissionRules(ModuleItem $moduleItem): array
     {
-        /** @var  \App\Models\User  $user */
-        $user = Auth::user();
-        $assignment = $submission->assignment;
+        $rules = [];
 
-        if (! $user->isInstructor() || $assignment->course->instructor_id !== $user->id) {
-            abort(Response::HTTP_FORBIDDEN);
+        switch ($moduleItem->submission_type) {
+            case 'file':
+                $rules = [
+                    'content.file' => 'required|file|max:10240', // 10MB max
+                    'content.file_name' => 'required|string|max:255',
+                    'content.file_type' => 'required|string|max:100',
+                ];
+                break;
+
+            case 'essay':
+                $rules = [
+                    'content.text' => 'required|string|min:100',
+                    'content.word_count' => 'required|integer|min:1',
+                ];
+                break;
+
+            case 'quiz':
+                $rules = [
+                    'content.answers' => 'required|array',
+                    'content.answers.*.question_id' => 'required|exists:questions,id',
+                    'content.answers.*.answer' => 'required',
+                    'content.time_taken' => 'required|integer|min:0',
+                ];
+                break;
         }
 
-        $data = $request->validate([
-            'score' => 'required|numeric|min:0|max:' . $assignment->max_score,
-            'feedback' => 'nullable|string',
-        ]);
-
-        $grade = $assignment->max_score > 0 ? round(($data['score'] / $assignment->max_score) * 100, 2) : 0.0;
-
-        $submission->update([
-            'score'  => $data['score'],
-            'grade'  => $grade,
-            'feedback' => $data['feedback'] ?? $submission->feedback,
-            'status' => 'graded',
-        ]);
-
-        // Notify student
-        $submission->student->notify(new AssignmentGraded($submission));
-
-        return $this->respond($submission, 'Submission graded');
+        return $rules;
     }
 
     /**
-     * Helper: auto-grade a quiz submission by comparing each answer
-     * to the question's correct option and computing a percentage.
+     * Auto-grade a quiz submission
      */
-    protected function autoGradeQuiz(Submission $submission)
+    protected function autoGradeQuiz(Submission $submission, ModuleItem $moduleItem): void
     {
-        $answers = $submission->answers; // [ question_id => selected_option_id, … ]
-        $total   = count($answers);
-        $correct = 0;
+        $score = 0;
+        $totalQuestions = $moduleItem->questions()->count();
+        $answers = collect($submission->content['answers']);
 
-        foreach ($answers as $questionId => $selectedOptionId) {
-            $correctOptionId = Question::find($questionId)
-                ->options()
-                ->where('is_correct', true)
-                ->value('id');
+        foreach ($moduleItem->questions as $question) {
+            $answer = $answers->firstWhere('question_id', $question->id);
+            
+            if (!$answer) {
+                continue;
+            }
 
-            if ($correctOptionId && $correctOptionId == $selectedOptionId) {
-                $correct++;
+            if ($question->isCorrect($answer['answer'])) {
+                $score++;
             }
         }
 
-        $percent = $total
-            ? round(($correct / $total) * 100, 2)
-            : 0.0;
-        $score = $submission->assignment && $submission->assignment->max_score > 0
-            ? round(($percent / 100) * $submission->assignment->max_score, 2)
-            : 0.0;
+        $grade = ($score / $totalQuestions) * $moduleItem->max_score;
+        
+        // Apply late penalty if any
+        if ($submission->late_penalty > 0) {
+            $grade = $grade * (1 - ($submission->late_penalty / 100));
+        }
 
         $submission->update([
-            'score'  => $score,
-            'grade'  => $percent,
+            'grade' => round($grade, 2),
             'status' => 'graded',
+            'graded_at' => now(),
+            'graded_by' => 'system',
         ]);
+    }
+
+    /**
+     * GET /api/courses/{course}/module-items/{item}/submissions/{submission}
+     * Show a single submission (owner or instructor).
+     */
+    public function show(Course $course, ModuleItem $moduleItem, Submission $submission)
+    {
+        $this->authorize('view', $submission);
+
+        $submission->load(['grade', 'submissionAnswers']);
+
+        return new SubmissionResource($submission);
+    }
+
+    /**
+     * PUT /api/courses/{course}/module-items/{item}/submissions/{submission}
+     * Grade or re-grade a submission (instructor only).
+     */
+    public function update(Request $request, Course $course, ModuleItem $moduleItem, Submission $submission)
+    {
+        $this->authorize('update', $submission);
+
+        $data = $this->validated($request, [
+            'content' => 'sometimes|required|string',
+            'file_path' => 'nullable|string',
+            'answers' => 'nullable|array',
+        ]);
+
+        $submission->update($data);
+
+        return new SubmissionResource($submission);
+    }
+
+    /**
+     * GET /api/submissions/my-submissions
+     * List current student's own submissions.
+     */
+    public function mySubmissions(Request $request)
+    {
+        $user = $request->user();
+        
+        $submissions = Submission::forUser($user->id)
+            ->with([
+                'moduleItem' => function ($query) {
+                    $query->with(['module.course', 'questions.options']);
+                },
+                'submissionAnswers.question',
+                'submissionAnswers.question.options'
+            ])
+            ->orderBy('created_at', 'desc')
+            ->paginate(15);
+
+        return SubmissionResource::collection($submissions);
+    }
+
+    /**
+     * DELETE /api/courses/{course}/module-items/{item}/submissions/{submission}
+     * Delete a submission (owner only).
+     */
+    public function destroy(Course $course, ModuleItem $moduleItem, Submission $submission)
+    {
+        $this->authorize('delete', $submission);
+
+        $submission->delete();
+
+        return $this->respond(null, 'Submission deleted', Response::HTTP_NO_CONTENT);
     }
 }

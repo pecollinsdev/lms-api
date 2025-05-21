@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class SubmissionResource extends JsonResource
@@ -9,33 +10,43 @@ class SubmissionResource extends JsonResource
     /**
      * Transform the resource into an array.
      *
-     * @param  \Illuminate\Http\Request  $request
      * @return array<string, mixed>
      */
-    public function toArray($request)
+    public function toArray(Request $request): array
     {
-        return [
+        $data = [
             'id' => $this->id,
-            'status' => $this->status,
-            'grade' => $this->grade,
-            'score' => $this->score,
-            'feedback' => $this->feedback,
-            'submitted_at' => $this->submitted_at,
+            'user_id' => $this->user_id,
+            'module_item_id' => $this->module_item_id,
             'content' => $this->content,
             'file_path' => $this->file_path,
+            'status' => $this->status,
+            'submission_type' => $this->submission_type,
             'answers' => $this->answers,
-            'assignment' => [
-                'id' => $this->assignment->id,
-                'title' => $this->assignment->title,
-                'due_date' => $this->assignment->due_date,
-                'max_score' => $this->assignment->max_score,
-            ],
-            'student' => [
-                'id' => $this->student->id,
-                'name' => $this->student->name,
-                'email' => $this->student->email,
-                'avatar' => $this->student->avatar ?? null,
-            ],
+            'submitted_at' => $this->submitted_at,
+            'created_at' => $this->created_at,
+            'updated_at' => $this->updated_at,
         ];
+
+        // Add user data if loaded
+        if ($this->relationLoaded('user')) {
+            $data['user'] = [
+                'id' => $this->user->id,
+                'name' => $this->user->name,
+                'email' => $this->user->email,
+            ];
+        }
+
+        // Add module item data if loaded
+        if ($this->relationLoaded('moduleItem')) {
+            $data['module_item'] = new ModuleItemResource($this->moduleItem);
+        }
+
+        // Add grade data if loaded
+        if ($this->relationLoaded('grade')) {
+            $data['grade'] = new GradeResource($this->grade);
+        }
+
+        return $data;
     }
 } 

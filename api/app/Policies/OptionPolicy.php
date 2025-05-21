@@ -30,16 +30,16 @@ class OptionPolicy
 
     public function create(User $user, Question $question)
     {
-        return $user->id === $question->assignment->course->instructor_id;
+        return (new QuestionPolicy)->update($user, $question);
     }
 
     public function update(User $user, Option $option)
     {
-        return $user->id === $option->question->assignment->course->instructor_id;
+        return (new QuestionPolicy)->update($user, $option->question);
     }
 
     public function delete(User $user, Option $option)
     {
-        return $user->id === $option->question->assignment->course->instructor_id;
+        return (new QuestionPolicy)->update($user, $option->question);
     }
 }
